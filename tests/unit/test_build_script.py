@@ -115,3 +115,49 @@ class TestTargetConfig:
         for name, cfg in build_module.TARGETS.items():
             for path in cfg["paths"]:
                 assert path.is_dir(), f"{name} 的源码路径不存在: {path}"
+
+
+class TestStripRuntimeData:
+    """产物里绝不能带运行期数据。
+
+    程序跑起来会在可执行文件旁边建 ``data/``，里面是数据库、缓存和
+    **API 令牌**。打包前只要有人跑过一次这个 exe，那份数据就会被打进发布包 ——
+    所有装这个包的用户会共用同一个令牌，认证等于没做。
+    """
+
+    def test_删掉_data_目录(self, tmp_path: Path, build_module) -> None:
+        out_dir = tmp_path / "backend"
+        (out_dir / "data").mkdir(parents=True)
+        (out_dir / "data" / "token").write_text("secret", encoding="utf-8")
+        (out_dir / "mograb-api.exe").write_text("binary", encoding="utf-8")
+
+        build_module.strip_runtime_data(out_dir)
+
+        assert not (out_dir / "data").exists()
+        # 其余内容不动
+        assert (out_dir / "mograb-api.exe").is_file()
+
+    def test_没有_data_时不动任何东西(self, tmp_path: Path, build_module) -> None:
+        out_dir = tmp_path / "backend"
+        out_dir.mkdir()
+        (out_dir / "mograb-api.exe").write_text("binary", encoding="utf-8")
+
+        build_module.strip_runtime_data(out_dir)
+
+        assert sorted(p.name for p in out_dir.iterdir()) == ["mograb-api.exe"]
+
+    def test_幂等(self, tmp_path: Path, build_module) -> None:
+        out_dir = tmp_path / "backend"
+        (out_dir / "data").mkdir(parents=True)
+
+        build_module.strip_runtime_data(out_dir)
+        build_module.strip_runtime_data(out_dir)
+
+        assert not (out_dir / "data").exists()
+
+    def test_产物目录不存在也不报错(self, tmp_path: Path, build_module) -> None:
+        build_module.strip_runtime_data(tmp_path / "nope")
+
+    def test_每个构建目标都可能产生_data(self, build_module) -> None:
+        """两个目标都会在 exe 旁边建 data/，所以清理对两者都要做。"""
+        assert set(build_module.TARGETS) == {"cli", "backend"}

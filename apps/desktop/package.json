@@ -32,7 +32,11 @@
     "extraResources": [
       {
         "from": "../../release-artifacts/backend",
-        "to": "backend"
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!data/**"
+        ]
       }
     ],
     "win": {

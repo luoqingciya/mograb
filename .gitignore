@@ -54,7 +54,9 @@ htmlcov/
 node_modules/
 apps/desktop/out/
 apps/desktop/dist/
-apps/desktop/release/
+# release/ 是 electron-builder 的标准输出目录；
+# 带后缀的（release-nsis 之类）是本地验证时临时指定的输出目录，一并忽略
+apps/desktop/release*/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
