@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""API 集成冒烟测试（规划书 §47 Integration Test）。
+"""API 集成测试（规划书 §47）。
 
-验证：应用可构造、路由已注册、健康检查可用、错误模型符合约定。
+用 FastAPI 的 TestClient 跑真实路由。要 ``with`` 起来 —— 应用是在 lifespan 里
+装配的，不用上下文管理器就不会触发，``app.state.application`` 是空的。
+
+全部离线：数据目录由 conftest 的 autouse fixture 指到临时目录。
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,9 +20,15 @@ from mograb_api.main import API_PREFIX, create_app
 pytestmark = pytest.mark.integration
 
 
-@pytest.fixture(scope="module")
-def client() -> TestClient:
-    return TestClient(create_app())
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    with TestClient(create_app()) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def example_yaml(example_source_dir: Path) -> str:
+    return str(example_source_dir / "source.yaml")
 
 
 class TestAppStructure:
@@ -35,6 +47,7 @@ class TestAppStructure:
             f"{API_PREFIX}/search",
             f"{API_PREFIX}/books",
             f"{API_PREFIX}/tasks",
+            f"{API_PREFIX}/tasks/events",
             f"{API_PREFIX}/tasks/{{task_id}}/events",
             f"{API_PREFIX}/exports",
         ):
@@ -46,13 +59,183 @@ class TestAppStructure:
 
 class TestErrorModel:
     def test_not_found_uses_error_model(self, client: TestClient) -> None:
-        """404 响应体应包含 code / message / details 三字段（规划书 §37）。"""
+        """404 响应体是 {code, message, details} 三字段（规划书 §37）。"""
         response = client.get(f"{API_PREFIX}/books/does-not-exist")
         assert response.status_code == 404
         body = response.json()
-        assert "detail" in body  # FastAPI HTTPException 形态
+        assert body["code"] == "STORAGE_NOT_FOUND"
+        assert "message" in body
+        assert "details" in body
 
-    def test_not_implemented_endpoints_return_501(self, client: TestClient) -> None:
-        """骨架阶段未实现的写接口返回 501 而非 500。"""
-        response = client.post(f"{API_PREFIX}/tasks", json={"type": "download_book"})
-        assert response.status_code == 501
+    def test_source_not_found_code(self, client: TestClient) -> None:
+        response = client.get(f"{API_PREFIX}/sources/nope")
+        assert response.status_code == 404
+        assert response.json()["code"] == "SOURCE_NOT_FOUND"
+
+    def test_schema_error_maps_to_422(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API_PREFIX}/sources", json={"mode": "yaml", "content": "id: Bad_ID\n"}
+        )
+        assert response.status_code == 422
+        assert response.json()["code"].startswith("SOURCE_")
+
+
+class TestSourcesApi:
+    def test_list_empty(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/sources").json() == []
+
+    def test_install_and_list(self, client: TestClient, example_yaml: str) -> None:
+        created = client.post(
+            f"{API_PREFIX}/sources",
+            json={"mode": "file", "path": example_yaml},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["id"] == "example"
+        assert created.json()["replaced"] is False
+
+        listed = client.get(f"{API_PREFIX}/sources").json()
+        assert [s["id"] for s in listed] == ["example"]
+        assert listed[0]["capabilities"] == ["search", "book", "chapters", "content"]
+
+    def test_install_yaml_content(self, client: TestClient) -> None:
+        content = (
+            "spec_version: 1\n"
+            "id: inline\n"
+            "name: Inline\n"
+            "version: 1.0.0\n"
+            "capabilities: [search]\n"
+            "search:\n"
+            "  request: {method: GET, url: 'https://inline.example.com/s'}\n"
+            "  result:\n"
+            "    list: '.item'\n"
+            "    fields: {title: '.t', url: 'a@href'}\n"
+        )
+        response = client.post(f"{API_PREFIX}/sources", json={"mode": "yaml", "content": content})
+        assert response.status_code == 201, response.text
+        assert response.json()["id"] == "inline"
+
+    def test_install_rejects_broken_yaml(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API_PREFIX}/sources", json={"mode": "yaml", "content": "不是: [合法的"}
+        )
+        assert response.status_code == 422
+
+    def test_detail_includes_permissions(self, client: TestClient, example_yaml: str) -> None:
+        client.post(f"{API_PREFIX}/sources", json={"mode": "file", "path": example_yaml})
+        detail = client.get(f"{API_PREFIX}/sources/example").json()
+        assert detail["permissions"]["network"] == ["example.com"]
+        assert detail["permissions"]["script"] is False
+
+    def test_disable_enable_roundtrip(self, client: TestClient, example_yaml: str) -> None:
+        client.post(f"{API_PREFIX}/sources", json={"mode": "file", "path": example_yaml})
+
+        disabled = client.post(f"{API_PREFIX}/sources/example/disable").json()
+        assert disabled["enabled"] is False
+
+        enabled = client.post(f"{API_PREFIX}/sources/example/enable").json()
+        assert enabled["enabled"] is True
+
+    def test_delete(self, client: TestClient, example_yaml: str) -> None:
+        client.post(f"{API_PREFIX}/sources", json={"mode": "file", "path": example_yaml})
+        assert client.delete(f"{API_PREFIX}/sources/example").status_code == 200
+        assert client.get(f"{API_PREFIX}/sources").json() == []
+
+    def test_delete_missing(self, client: TestClient) -> None:
+        assert client.delete(f"{API_PREFIX}/sources/nope").status_code == 404
+
+    def test_doctor_offline(self, client: TestClient, example_yaml: str) -> None:
+        client.post(f"{API_PREFIX}/sources", json={"mode": "file", "path": example_yaml})
+        result = client.post(f"{API_PREFIX}/sources/example/doctor").json()
+        assert result["health"] == "healthy"
+
+    def test_rescan(self, client: TestClient, example_yaml: str) -> None:
+        client.post(f"{API_PREFIX}/sources", json={"mode": "file", "path": example_yaml})
+        assert len(client.post(f"{API_PREFIX}/sources/rescan").json()) == 1
+
+
+class TestSearchApi:
+    def test_no_sources_returns_empty(self, client: TestClient) -> None:
+        response = client.get(f"{API_PREFIX}/search", params={"q": "三体"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 0
+        assert body["items"] == []
+
+    def test_requires_keyword(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/search").status_code == 422
+
+
+class TestBooksApi:
+    def test_list_empty(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/books").json() == []
+
+    def test_chapters_of_missing_book(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/books/nope/chapters").status_code == 404
+
+    def test_update_dry_run_on_missing_book(self, client: TestClient) -> None:
+        response = client.post(f"{API_PREFIX}/books/nope/update")
+        assert response.status_code == 404
+
+
+class TestTasksApi:
+    def test_list_empty(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/tasks").json() == []
+
+    def test_create_refresh_task(self, client: TestClient) -> None:
+        """refresh_source 不需要书源也不需要网络，适合验证创建链路。"""
+        created = client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+        assert created.status_code == 201, created.text
+        body = created.json()
+        assert body["type"] == "refresh_source"
+        assert body["status"] in {"pending", "running", "success"}
+        assert body["id"].startswith("task_")
+
+    def test_get_task(self, client: TestClient) -> None:
+        created = client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+        task_id = created.json()["id"]
+        fetched = client.get(f"{API_PREFIX}/tasks/{task_id}")
+        assert fetched.status_code == 200
+        assert fetched.json()["id"] == task_id
+
+    def test_get_missing_task(self, client: TestClient) -> None:
+        response = client.get(f"{API_PREFIX}/tasks/nope")
+        assert response.status_code == 404
+        assert response.json()["code"] == "TASK_NOT_FOUND"
+
+    def test_bad_task_type_rejected(self, client: TestClient) -> None:
+        assert client.post(f"{API_PREFIX}/tasks", json={"type": "nonsense"}).status_code == 422
+
+    def test_cancel_then_list(self, client: TestClient) -> None:
+        created = client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+        task_id = created.json()["id"]
+
+        # refresh_source 跑得很快，可能已经结束了 —— 结束了就不能取消，这是对的
+        cancelled = client.post(f"{API_PREFIX}/tasks/{task_id}/cancel")
+        assert cancelled.status_code in {200, 409}
+
+        listed = client.get(f"{API_PREFIX}/tasks").json()
+        assert task_id in [t["id"] for t in listed]
+
+    def test_status_filter(self, client: TestClient) -> None:
+        client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+        response = client.get(f"{API_PREFIX}/tasks", params={"status": "success"})
+        assert response.status_code == 200
+
+    def test_retry_non_terminal_conflicts(self, client: TestClient) -> None:
+        created = client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+        task_id = created.json()["id"]
+        # 还没失败的任务不能重试，状态机返回 409
+        response = client.post(f"{API_PREFIX}/tasks/{task_id}/retry")
+        assert response.status_code in {201, 409}
+
+
+class TestExportsApi:
+    def test_create_for_missing_book(self, client: TestClient) -> None:
+        response = client.post(f"{API_PREFIX}/exports", json={"book_id": "nope"})
+        assert response.status_code == 404
+
+    def test_list_empty(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/exports").json() == []
+
+    def test_get_missing(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/exports/nope").status_code == 404

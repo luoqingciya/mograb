@@ -24,6 +24,7 @@ from ..domain.task import Task
 from ..errors import InvalidTaskTransitionError, TaskNotFoundError
 from ..logging.setup import get_logger
 from .queue import TaskQueue
+from .runner import StatusCallback
 from .worker import TaskHandler, WorkerPool
 
 _logger = get_logger(__name__)
@@ -59,13 +60,25 @@ class TaskManager:
         handlers: dict[str, TaskHandler],
         *,
         worker_count: int = 4,
+        on_status_change: StatusCallback | None = None,
     ) -> None:
+        """Args:
+        repository: 任务仓储。
+        handlers: 任务类型 -> 处理函数。
+        worker_count: worker 数量。
+        on_status_change: 额外的状态变更回调，在持久化**之后**调用。
+            API server 用它把进度推给 SSE；CLI 不需要。
+        """
         self._repo = repository
         self._handlers = handlers
         self._queue = TaskQueue()
-        self._pool = WorkerPool(
-            self._queue, handlers, size=worker_count, on_status_change=self._persist
-        )
+
+        async def notify(task: Task) -> None:
+            await self._persist(task)
+            if on_status_change is not None:
+                await on_status_change(task)
+
+        self._pool = WorkerPool(self._queue, handlers, size=worker_count, on_status_change=notify)
         self._running = False
 
     # ------------------------------------------------------------------

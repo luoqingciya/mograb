@@ -50,7 +50,7 @@ from .storage import (
     SqliteTaskRepository,
 )
 from .task.manager import TaskManager
-from .task.runner import TaskHandler, TaskRunner
+from .task.runner import StatusCallback, TaskHandler, TaskRunner
 from .task.scheduler import DownloadScheduler, ProgressCallback
 
 _logger = get_logger(__name__)
@@ -187,8 +187,10 @@ class Application:
         exporter = get_exporter(fmt)
         target = self.resolve_export_target(book, task.params.get("target"))
 
+        # API 那边会先建一条 PENDING 记录再把 id 塞进 params，
+        # 这样调用方拿到 id 就能查状态。CLI 不给就现建一个。
         record = ExportRecord(
-            id=new_id("export"),
+            id=str(task.params.get("export_id") or new_id("export")),
             book_id=book.id,
             format=exporter.format,
             status=ExportStatus.RUNNING,
@@ -262,17 +264,25 @@ class Application:
         return directory / f"{name}.{self.settings.output.format}"
 
 
-def build_task_manager(app: Application, *, worker_count: int | None = None) -> TaskManager:
+def build_task_manager(
+    app: Application,
+    *,
+    worker_count: int | None = None,
+    on_status_change: StatusCallback | None = None,
+) -> TaskManager:
     """按应用配置建任务管理器。
 
     单独一个函数是因为 :class:`Application` 是 dataclass，TaskManager 需要
     拿到 handlers，而 handlers 又是 Application 的方法 —— 构造顺序上有个环，
     用工厂函数绕开。
+
+    ``on_status_change`` 给 API server 用：把任务进度推给 SSE。
     """
     return TaskManager(
         app.tasks,
         app.task_handlers(),
         worker_count=worker_count or max(2, app.settings.download.concurrency),
+        on_status_change=on_status_change,
     )
 
 

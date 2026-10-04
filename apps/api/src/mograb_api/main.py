@@ -9,6 +9,9 @@
 - 统一错误模型 ``{code, message, details}``（§37）
 - 自动生成 OpenAPI 文档，``/docs`` 可访问
 
+各层的装配在 :func:`mograb.app.create_application` —— CLI 用的是同一份，
+这里只负责把它挂到 ``app.state`` 上，并在启动时拉起 worker 池。
+
 启动方式::
 
     mog server start              # 由 CLI 拉起
@@ -25,9 +28,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mograb import __version__
-from mograb.config import AppSettings, get_paths, load_settings
-from mograb.logging import configure_logging, get_logger
+from mograb.app import Application, build_task_manager, create_application
+from mograb.config import AppSettings, load_settings
+from mograb.domain.task import Task
+from mograb.logging import get_logger
 
+from .bus import EventBus
 from .errors import register_exception_handlers
 from .routers import books, events, exports, search, sources, tasks
 
@@ -38,26 +44,51 @@ API_PREFIX = "/api/v1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """应用生命周期：初始化路径、日志、数据库与任务管理器。"""
+    """装配应用、拉起 worker 池，退出时收尾。"""
     settings: AppSettings = app.state.settings
-    paths = get_paths()
-    paths.ensure()
-    configure_logging(
-        level=settings.logging.level,
-        log_dir=paths.logs_dir,
-        json_output=settings.logging.json_output,
-    )
-    _logger.info("api.startup", version=__version__, host=settings.server.host)
+    bus = EventBus()
 
-    # TODO(storage): 初始化 Database、TaskManager，并挂载到 app.state
-    yield
+    async def publish_task(task: Task) -> None:
+        """任务状态变了就广播一条，SSE 那边在等。"""
+        await bus.publish(
+            {
+                "event": "task",
+                "task_id": task.id,
+                "type": task.type.value,
+                "status": task.status.value,
+                "book_id": task.book_id,
+                "total": task.total,
+                "completed": task.completed,
+                "failed": task.failed,
+                "error_code": task.error_code,
+                "error_message": task.error_message,
+            }
+        )
 
-    _logger.info("api.shutdown")
+    async with create_application(settings=settings) as application:
+        # 换掉默认的 TaskManager：加上广播钩子，并启动 worker 池。
+        # start() 同时会做一次孤儿任务恢复。
+        application.task_manager = build_task_manager(application, on_status_change=publish_task)
+        await application.task_manager.start()
+
+        app.state.application = application
+        app.state.bus = bus
+
+        _logger.info(
+            "api.startup",
+            version=__version__,
+            host=settings.server.host,
+            port=settings.server.port,
+        )
+        try:
+            yield
+        finally:
+            _logger.info("api.shutdown")
 
 
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     """应用工厂。"""
-    settings = settings or load_settings()
+    resolved = settings or load_settings()
 
     app = FastAPI(
         title="MoGrab API",
@@ -68,9 +99,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         redoc_url="/redoc",
         openapi_url="/openapi.json",
     )
-    app.state.settings = settings
+    app.state.settings = resolved
 
-    # 本地 API 的 CORS 策略：仅允许本机来源（Desktop 使用 file:// 或 localhost）
+    # 本地 API 的 CORS：只允许本机来源（Desktop 走 file:// 或 localhost）
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"^(https?://(127\.0\.0\.1|localhost)(:\d+)?|file://.*)$",
@@ -81,12 +112,14 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
 
+    # 顺序有讲究：`/tasks/events` 和 `/tasks/{task_id}` 段数一样，
+    # events 必须先注册，否则 "events" 会被当成任务 ID。
+    app.include_router(events.router, prefix=API_PREFIX)
     app.include_router(sources.router, prefix=API_PREFIX)
     app.include_router(search.router, prefix=API_PREFIX)
     app.include_router(books.router, prefix=API_PREFIX)
     app.include_router(tasks.router, prefix=API_PREFIX)
     app.include_router(exports.router, prefix=API_PREFIX)
-    app.include_router(events.router, prefix=API_PREFIX)
 
     @app.get("/health", tags=["meta"], summary="健康检查")
     async def health() -> dict[str, str]:
@@ -116,4 +149,4 @@ def run() -> None:
     )
 
 
-__all__ = ["API_PREFIX", "app", "create_app", "run"]
+__all__ = ["API_PREFIX", "Application", "app", "create_app", "run"]

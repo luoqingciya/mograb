@@ -62,13 +62,33 @@
 
 ### 应用
 
-- `apps/cli` —— `mog` 命令，11 个命令组。退出码定成 7 个。
-  `mog source lint` 和 `mog config` 已经能用了。
-- `apps/api` —— FastAPI，22 个端点挂在 `/api/v1` 下。统一错误模型，
-  SSE 事件流（除了规划书要求的单任务流，另外加了全局流，桌面端任务页要用）。
-  CORS 收紧到只允许本机来源。
+- `apps/cli` —— `mog` 命令，11 个命令组，退出码定成 7 个。全部接线完成：
+  书源管理（list / show / lint / install / remove / enable / disable / rescan /
+  doctor / init）、跨源搜索、书籍信息、下载、增量更新、导出、任务查询、
+  缓存管理、配置、日志、server 控制。
+
+  下载是就地跑完再退出 —— 命令行进程起 worker 池再等调度没意义；
+  后台执行交给 API server。任务记录照样写库，`mog task list` 能看到历史。
+
+  `mog task pause/resume/cancel/retry` 走 API：任务状态在 server 进程的内存里，
+  改数据库它不知道。连不上就给一句人话，不抛 httpx 堆栈。
+
+- `apps/api` —— FastAPI，22 个端点挂在 `/api/v1` 下，全部接线完成。
+  统一错误模型；SSE 事件流（除规划书要求的单任务流外，另加了全局流，
+  桌面端任务页要用）；CORS 收紧到只允许本机来源。任务走 worker 池 + 队列，
+  支持暂停/继续/取消。
+
 - `apps/desktop` —— Electron 骨架。开了 `contextIsolation` 和 `sandbox`，
   关了 `nodeIntegration`，CSP 只放行本地 API。
+
+### 装配
+
+新增 `mograb.app` 作为 composition root。CLI 和 API 要的是同一套东西
+（数据库、仓储、HTTP 客户端、引擎、管线、调度器、任务管理器），
+这套装配只该有一份 —— 两边各接一遍迟早会走样。`create_application()` 是唯一入口。
+
+顺带把「执行任务 + 维护状态机」从 WorkerPool 里抽成 `TaskRunner`：
+CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的处理不一样」。
 
 ### 书源
 
@@ -86,7 +106,7 @@
 - GitHub Actions：CI（lint / 类型检查 / 测试矩阵 / 书源校验 / 构建），
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`。
-- 375 个测试，覆盖率 87%，门槛设在 70%。
+- 439 个测试，覆盖率 83%，门槛设在 70%。
 
 ### 相对原规划书的改动
 
@@ -109,12 +129,10 @@
 
 ### 还没做
 
-- CLI 和 API 的业务接线
-- CLI 除了 `source lint`、`config`，API 除了 `/health`，其余都是骨架
-- API 没有认证，只有 CORS
-- `.mgs` 打包格式没做
-- E2E 测试没建
+- API 没有认证，只有 CORS。**v0.4.0 之前必须补上随机 token**
+- `.mgs` 打包格式没做，第一阶段只支持裸 `.yaml`
 - 桌面端只有占位界面
+- 桌面端打包在 `apps/desktop/package-lock.json` 出现前会跳过
 
 ## 版本规划
 

@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """SSE 事件流（规划书 §30）。
 
-规划书只定义了单任务事件流 ``GET /tasks/{id}/events``；
-但 Desktop 的任务页需要**全局**实时更新，因此本实现额外提供
-``GET /tasks/events`` 聚合流（对应评估报告 P2-01）。
+规划书只定义了单任务事件流 ``GET /tasks/{id}/events``；但 Desktop 的任务页
+需要**全局**实时更新，所以额外提供 ``GET /tasks/events`` 聚合流。
 
-事件格式::
+第一版不用 WebSocket —— 单向进度通知，SSE 够用。
 
-    event: progress
-    data: {"task_id":"task_123","completed":520,"total":1000,"speed":3.4}
-
-第一版不需要 WebSocket —— SSE 对单向进度通知已足够。
+注意路由顺序：``/tasks/events`` 和 ``/tasks/{task_id}`` 段数相同，
+所以这个 router 必须在 tasks router **之前**注册，否则 ``events``
+会被当成一个任务 ID。
 """
 
 from __future__ import annotations
@@ -22,45 +20,55 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
+from ..bus import EventBus
+
 router = APIRouter(tags=["events"])
 
 HEARTBEAT_SECONDS = 15
-"""心跳间隔；防止中间代理断开空闲连接。"""
+"""心跳间隔。防中间代理把空闲连接掐掉。"""
 
 
-async def _event_stream(
-    request: Request, *, task_id: str | None = None
+async def _stream(
+    bus: EventBus, request: Request, *, task_id: str | None
 ) -> AsyncIterator[dict[str, str]]:
-    """事件流生成器。
+    """从总线读事件往下推。"""
+    async with bus.subscribe() as queue:
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield {"event": "heartbeat", "data": json.dumps({"task_id": task_id})}
+                continue
 
-    骨架实现：以固定间隔发送心跳，直到客户端断开。
-    接入 TaskManager 后，改为从内部事件总线（asyncio.Queue）消费。
-    """
-    seq = 0
-    while True:
-        if await request.is_disconnected():
-            break
-        seq += 1
-        yield {
-            "event": "heartbeat",
-            "id": str(seq),
-            "data": json.dumps({"task_id": task_id, "seq": seq}, ensure_ascii=False),
-        }
-        await asyncio.sleep(HEARTBEAT_SECONDS)
+            if task_id is not None and event.get("task_id") != task_id:
+                continue
+
+            yield {
+                "event": str(event.get("event", "message")),
+                "id": str(event.get("task_id", "")),
+                "data": json.dumps(event, ensure_ascii=False, default=str),
+            }
+
+
+def _bus(request: Request) -> EventBus:
+    bus: EventBus | None = getattr(request.app.state, "bus", None)
+    if bus is None:  # pragma: no cover - lifespan 正常跑就不会走到
+        raise RuntimeError("事件总线未初始化")
+    return bus
+
+
+@router.get("/tasks/events", summary="全局任务事件流（SSE）")
+async def all_task_events(request: Request) -> EventSourceResponse:
+    """订阅所有任务的事件。Desktop 的任务页用这个。"""
+    return EventSourceResponse(_stream(_bus(request), request, task_id=None))
 
 
 @router.get("/tasks/{task_id}/events", summary="单任务事件流（SSE）")
 async def task_events(task_id: str, request: Request) -> EventSourceResponse:
     """订阅单个任务的进度事件。"""
-    # TODO(task): 校验任务存在性（接入 TaskManager 后启用）
-    _ = task_id
-    return EventSourceResponse(_event_stream(request, task_id=task_id))
-
-
-@router.get("/tasks/events", summary="全局任务事件流（SSE）")
-async def all_task_events(request: Request) -> EventSourceResponse:
-    """订阅所有任务的事件（Desktop 任务页使用）。"""
-    return EventSourceResponse(_event_stream(request))
+    return EventSourceResponse(_stream(_bus(request), request, task_id=task_id))
 
 
 __all__: list[str] = ["router"]
