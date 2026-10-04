@@ -97,6 +97,24 @@ def cmd_show() -> None:
     print(raw)
 
 
+def cmd_flags() -> None:
+    """输出版本属性，写成 ``key=value`` 供 CI 直接塞进 ``$GITHUB_OUTPUT``。
+
+    ``prerelease`` 决定 GitHub Release 要不要标成预发布。用 ``packaging``
+    判定而不是自己写正则 —— 「哪些后缀算预发布」是 PEP 440 定义的，
+    手写正则迟早会漏掉 ``.post`` 之类的边角。
+    """
+    version = validate(read_version())
+
+    try:
+        from packaging.version import Version
+    except ImportError as exc:  # pragma: no cover - CI 里一定有
+        raise SystemExit("需要 packaging 才能判定预发布，先跑 uv sync") from exc
+
+    print(f"version={version}")
+    print(f"prerelease={'true' if Version(version).is_prerelease else 'false'}")
+
+
 def cmd_check() -> int:
     """校验版本格式，并确认各包未硬编码版本号。"""
     raw = read_version()
@@ -104,7 +122,6 @@ def cmd_check() -> int:
     print(f"[version] VERSION 文件: {version}")
 
     problems = 0
-
     # 1) 各包的 pyproject 应使用 dynamic version，而非硬编码
     for pkg_dir in PACKAGE_DIRS:
         pyproject = pkg_dir / "pyproject.toml"
@@ -167,6 +184,7 @@ def main() -> None:
 
     sub.add_parser("show", help="显示当前版本")
     sub.add_parser("check", help="校验版本格式与来源唯一性")
+    sub.add_parser("flags", help="输出版本属性（key=value），供 CI 使用")
 
     p_set = sub.add_parser("set", help="设置新版本")
     p_set.add_argument("version", help="新的 PEP 440 版本号")
@@ -177,6 +195,8 @@ def main() -> None:
         cmd_show()
     elif args.command == "check":
         sys.exit(cmd_check())
+    elif args.command == "flags":
+        cmd_flags()
     elif args.command == "set":
         cmd_set(args.version)
 

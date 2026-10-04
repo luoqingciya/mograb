@@ -5,10 +5,16 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
-## [0.1.0.dev0] - 未发布
+## [1.0.0rc0] - 2026-10-04
 
-项目初始化。把规划书里互相矛盾的地方定下来，冻结了四份规范，搭出可运行、
-可测试的骨架。
+**首个预发布版本。** 规范冻结、核心链路跑通、API 与 CLI 接线完成、
+桌面端最小闭环可用。
+
+这是一个 **release candidate**：接口层面已经稳定，但还没在真实站点上验证过
+完整下载，所以不标正式版。
+
+装上之后能干的事：装书源 → 跨源搜书 → 下载整本 → 增量更新 →
+导出 TXT / Markdown / EPUB。命令行、本地 API、桌面端三条路都能走。
 
 ### 规范
 
@@ -113,7 +119,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`、
   `scripts/check_docs.py`。
-- 528 个测试，覆盖率 85%，门槛设在 70%。桌面端另有 14 个（`npm test`）。
+- 542 个测试，覆盖率 85%，门槛设在 70%。桌面端另有 14 个（`npm test`）。
 
 ### 修复
 
@@ -187,15 +193,15 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 按规划书的节奏走（这里是**目标**，各版本实际做到哪一步见
 [docs/progress.md](docs/progress.md)）：
 
-| 版本 | 目标 |
-|------|------|
-| v0.1.0 | 能完整下载一本小说 |
-| v0.2.0 | 能稳定下载大量章节 |
-| v0.3.0 | 第三方能写书源并维护 |
-| v0.4.0 | API 成为正式接口 |
-| v0.5.0 | CLI 在 Windows / Linux 上独立可用 |
-| v0.6.0 | Windows 桌面端 Beta |
-| v0.7.0 | 输出质量和性能 |
-| v1.0.0 | 规范、API、CLI 命令全部稳定 |
+| 版本 | 目标 | 状态 |
+|------|------|------|
+| v0.1.0 | 能完整下载一本小说 | 已达成 |
+| v0.2.0 | 能稳定下载大量章节 | 已达成（未在真实站点验证） |
+| v0.3.0 | 第三方能写书源并维护 | 部分（缺 Source Registry） |
+| v0.4.0 | API 成为正式接口 | 已达成 |
+| v0.5.0 | CLI 在 Windows / Linux 上独立可用 | 已达成 |
+| v0.6.0 | Windows 桌面端 Beta | 进行中 |
+| v0.7.0 | 输出质量和性能 | 部分（缺封面与元数据模板） |
+| v1.0.0 | 规范、API、CLI 命令全部稳定 | 本版是它的 rc |
 
-[0.1.0.dev0]: https://github.com/luoqingciya/mograb/releases
+[1.0.0rc0]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc0

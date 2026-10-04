@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-04 · 对应版本 `0.1.0.dev0`
+> 更新于 2026-10-04 · 当前版本 `1.0.0rc0`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -16,11 +16,11 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 528 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 542 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 5,300 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 5,450 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（7 个 job） | `gh run list` |
@@ -38,7 +38,7 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
 | v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
 | v0.7.0 | EPUB / Polish | **部分** | 封面、元数据模板、性能优化 |
-| v1.0.0 | Stable | 未到 | — |
+| v1.0.0 | Stable | **rc** | 真实站点验证、桌面端三个页面 |
 
 ### v0.1.0 逐项
 
@@ -154,6 +154,9 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 ## 已完成的重要节点
 
+- **首个预发布版本 `1.0.0rc0`**（2026-10-04）。规范冻结、核心链路跑通、
+  API 与 CLI 接线完成、桌面端最小闭环可用。**是 rc 不是正式版** ——
+  还没在真实站点上验证过完整下载。
 - **v0.4.0 的认证缺口已补**（2026-10-04）。API 的所有业务端点现在要求
   `Authorization: Bearer <token>`，令牌自动生成在 `data/token`。
   详见 [ADR-0004](architecture/decisions/ADR-0004-local-api-auth.md)

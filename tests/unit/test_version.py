@@ -42,9 +42,17 @@ class TestVersionFile:
         # 解析失败会抛 InvalidVersion，即测试失败
         assert Version(declared_version) == Version(declared_version)
 
-    def test_matches_expected_shape(self, declared_version: str) -> None:
-        """当前处于 0.1.x 开发阶段。"""
-        assert re.match(r"^0\.1\.0(\.dev\d+)?$", declared_version), declared_version
+    def test_不低于项目起点(self, declared_version: str) -> None:
+        """版本号只能往上走，不能倒退。
+
+        刻意**不写死具体版本**。原先这里断言的是 `^0\\.1\\.0(\\.dev\\d+)?$`
+        （「当前处于 0.1.x 开发阶段」），每次发版都得改测试 —— 改着改着就变成
+        「看到红就顺手把数字改掉」，约束也就没了。
+
+        「打 tag 时版本号对不对」由 Release 工作流的版本一致性检查兜底，
+        比在单元测试里钉一个数字可靠。
+        """
+        assert Version(declared_version) >= Version("0.1.0.dev0")
 
 
 class TestRuntimeVersion:

@@ -4,14 +4,17 @@
 #
 # 触发方式：
 #   1. 推 v* tag（正式发版）
-#   2. 手动触发（预演，需要填版本号）
+#   2. 手动触发（可以只建 draft 做预演）
 #
-# 流程：Verify → 三路并行打包 → SHA256SUMS → GitHub Release（draft）
+# 流程：Verify → 三路并行打包 → SHA256SUMS → GitHub Release
+#
+# 预发布版本（1.0.0a1 / 1.0.0rc0 / 1.0.0.dev0）会自动标成 prerelease ——
+# 不标的话它会被当成正式版挂在 releases 页首，还会被当成 latest。
+# 判定交给 scripts/version.py flags（用 packaging，不手写正则）。
 #
 # 打包说明（§57.1、§57.2）：
 #   - CLI 用 PyInstaller onedir，不追求单文件 EXE
 #   - 最终产物不含 uv / Python / Node.js
-#   - 桌面端在 apps/desktop 有 package-lock.json 之前会跳过
 
 name: Release
 
@@ -21,9 +24,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号（不含 v 前缀），必须与 VERSION 文件一致，例如 0.1.0"
+        description: "版本号（不含 v 前缀），必须与 VERSION 文件一致，例如 1.0.0rc0"
         required: true
         type: string
+      draft:
+        description: "只建 draft，不公开发布（预演用）"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -40,6 +48,10 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
+    outputs:
+      # 后面的 job 靠这两个值拼产物名、决定要不要标预发布
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
 
@@ -54,18 +66,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-packages
 
-      # tag 名必须和 VERSION 文件一致，否则产物名和包内版本会对不上
-      - name: Check version matches VERSION file
+      # tag 名必须和 VERSION 文件一致，否则产物名和包内版本会对不上。
+      # 顺便把 version / prerelease 两个属性导出给后面的 job。
+      - name: Resolve and check version
+        id: version
         shell: bash
         run: |
-          version="${RAW_VERSION#v}"
+          set -euo pipefail
+          tag_version="${RAW_VERSION#v}"
           file_version="$(uv run python scripts/version.py show)"
-          echo "本次发布版本 = $version"
+          echo "本次发布版本 = $tag_version"
           echo "VERSION 文件   = $file_version"
-          if [ "$version" != "$file_version" ]; then
-            echo "::error::版本不一致。先把 VERSION 改成 $version 并提交，再重新打 tag"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::版本不一致。先把 VERSION 改成 $tag_version 并提交，再重新打 tag"
             exit 1
           fi
+
+          flags="$(uv run python scripts/version.py flags)"
+          echo "$flags"
+          echo "$flags" >> "$GITHUB_OUTPUT"
 
       - name: Check version source
         run: uv run python scripts/version.py check
@@ -124,9 +143,6 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Windows Desktop（后端 sidecar + Electron → ZIP + NSIS）
-  #
-  # apps/desktop 目前只有占位骨架，没有 package-lock.json。
-  # 检测到 lockfile 缺失就跳过，等桌面端真正做起来再自动生效。
   # ---------------------------------------------------------------------------
   build-desktop-windows:
     name: Build Desktop (Windows x64)
@@ -221,17 +237,11 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Create GitHub Release
-    needs: [build-cli-windows, build-desktop-windows, build-cli-linux]
+    # verify 要显式列出来 —— 间接依赖拿不到它的 outputs
+    needs: [verify, build-cli-windows, build-desktop-windows, build-cli-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      # tag 触发时 RAW_VERSION 形如 v0.1.0，手动触发时是用户填的 0.1.0。
-      # 统一在这里去掉 v 前缀，后面拼 tag 名和产物名都用这个值。
-      - name: Resolve version
-        id: version
-        shell: bash
-        run: echo "value=${RAW_VERSION#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -246,32 +256,31 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Extract release notes from CHANGELOG
-        id: notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
-          version="${{ steps.version.outputs.value }}"
-          # 取 CHANGELOG 里对应版本的段落（## [x.y.z] 到下一个 ## 之间）
-          awk -v ver="$version" '
-            $0 ~ "^## \\[?" ver "\\]?" {flag=1; next}
-            flag && /^## / {exit}
-            flag {print}
-          ' CHANGELOG.md > release-notes.md || true
-          if [ ! -s release-notes.md ]; then
-            echo "Release ${version}" > release-notes.md
-          fi
-          echo "----- 发布说明 -----"
-          cat release-notes.md
+          # 用脚本而不是内联 awk：反斜杠要穿过 YAML → bash → awk 三层转义，
+          # 写错一次就会把整份 CHANGELOG（连版本规划表）都当成发布说明。
+          # scripts/release.py 里是 re.escape 过的正则，还有测试盯着。
+          python3 scripts/release.py notes --version "$VERSION" > release-notes.md
+          echo "----- 发布说明（$(wc -l < release-notes.md) 行）-----"
+          head -30 release-notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ steps.version.outputs.value }}
-          name: v${{ steps.version.outputs.value }}
+          tag_name: v${{ needs.verify.outputs.version }}
+          name: v${{ needs.verify.outputs.version }}
           body_path: release-notes.md
           files: |
             artifacts/*.zip
             artifacts/*.tar.gz
             artifacts/*.exe
             artifacts/SHA256SUMS.txt
-          draft: true
+          # 预发布（a/b/rc/dev）必须标出来，否则会被当成正式版，
+          # 还会被 GitHub 当成 latest 挂到 releases 页首
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          # tag 触发一律直接发布；手动触发可以选只建 draft 做预演
+          draft: ${{ inputs.draft == true }}
           generate_release_notes: false

@@ -40,11 +40,12 @@
         "zip",
         "nsis"
       ],
-      "artifactName": "MoGrab-${version}-win-x64.${ext}"
+      "artifactName": "MoGrab-v${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "MoGrab-Setup-v${version}-win-x64.${ext}"
     }
   }
 }

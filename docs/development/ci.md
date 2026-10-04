@@ -61,6 +61,9 @@ uv run pytest -m "not network" --cov
 # 书源
 for f in tests/fixtures/**/source.yaml; do uv run mog source lint "$f"; done
 
+# 桌面端（测的是编译产物，所以 build 必须排在 test 前面）
+cd apps/desktop && npm run typecheck && npm run build && npm test && cd -
+
 # 构建
 uv build --all-packages --out-dir dist
 ```
@@ -76,30 +79,45 @@ uv build --all-packages --out-dir dist
 发版前先改版本号：
 
 ```bash
-uv run python scripts/version.py set 0.1.0     # 从 0.1.0.dev0 转正式版
-uv run python scripts/version.py check         # 确认来源唯一、格式合规
+uv run python scripts/version.py set 1.0.0rc1   # 写进去的是规范化形式
+uv run python scripts/version.py check          # 确认来源唯一、格式合规
 ```
 
-`check` 会验证三件事：VERSION 内容符合 PEP 440、三个包的 `pyproject.toml`
+`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc0` → `1.0.0rc0`，
+`1.0.0.DEV0` → `1.0.0.dev0`），所以 `VERSION` 里的值就是最终值。
+`check` 验证三件事：VERSION 内容符合 PEP 440、三个包的 `pyproject.toml`
 用的是 dynamic version 且指向同一个文件、源码里没有硬编码的 `__version__`。
+
+**改完必须强制重装一次**，否则打出来的产物会带旧版本号：
+
+```bash
+uv sync --all-packages --group build \
+  --reinstall-package mograb --reinstall-package mograb-cli --reinstall-package mograb-api
+```
+
+原因见下面的「踩过的坑」。`scripts/build.py` 现在会拦这种情况，版本对不上直接
+报错并给出上面这条命令。
 
 改完提交，再打 tag。tag 名要和 VERSION 一致，Release 工作流会用它命名产物。
 
 ### 3.2 触发
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0rc1
+git push origin v1.0.0rc1
 ```
 
-也可以在 Actions 页面手动跑（选 Release → Run workflow），填版本号即可。
-手动触发同样会校验版本号与 `VERSION` 文件是否一致，所以适合拿来做预演 ——
-但注意它最后也会建一个 draft release，预演完记得删掉。
+推 tag 就是发布 —— 工作流会直接建一个**公开**的 Release。
+版本号里带预发布段（`a` / `b` / `rc` / `dev`）时自动标成 **pre-release**，
+不标的话它会被当成正式版挂在 releases 页首，还会被 GitHub 当成 latest。
+
+想要只建 draft 不公开，走 Actions 页面手动触发（Release → Run workflow），
+填版本号并把 `draft` 勾上。手动触发同样校验版本号与 `VERSION` 文件是否一致。
 
 ### 3.3 流水线
 
 ```
-Verify（质量门禁）
+Verify（质量门禁 + 解析版本属性）
     ↓
 ┌──────────────────────┬──────────────────────┬──────────────────────┐
 │ CLI Windows          │ Desktop Windows      │ CLI Linux            │
@@ -109,18 +127,29 @@ Verify（质量门禁）
     ↓
 SHA256SUMS.txt
     ↓
-GitHub Release（draft）
+GitHub Release（预发布版本自动标 prerelease）
 ```
+
+`Verify` 会把 `version` 和 `prerelease` 两个属性导出给后面的 job ——
+后者由 `scripts/version.py flags` 判定（内部用 `packaging`，
+不手写正则：「哪些后缀算预发布」是 PEP 440 定义的，手写迟早漏掉 `.post` 之类）。
 
 ### 3.4 产物清单
 
+以 `1.0.0rc0` 为例：
+
 | 产物 | 类型 | 说明 |
 |------|------|------|
-| `MoGrab-CLI-v0.1.0-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
-| `MoGrab-v0.1.0-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
-| `MoGrab-Setup-v0.1.0-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
-| `MoGrab-CLI-v0.1.0-linux-x64.tar.gz` | Linux CLI | |
+| `MoGrab-CLI-v1.0.0rc0-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
+| `MoGrab-v1.0.0rc0-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
+| `MoGrab-Setup-v1.0.0rc0-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
+| `MoGrab-CLI-v1.0.0rc0-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
+
+命名统一带 `v` 前缀，桌面端两个产物用 `MoGrab-` 和 `MoGrab-Setup-` 区分 ——
+一个 Portable 一个安装包，名字一样只靠扩展名区分太容易拿错。
+产物名在 `apps/desktop/package.json` 的 `win.artifactName` / `nsis.artifactName`
+里配，CLI 侧在 Release 工作流里拼。
 
 桌面端产物来自 `npm run build` + `electron-builder`，后端 sidecar 单独打包后
 放进 `resources/backend/`。版本号通过 `--config.extraMetadata.version` 从 tag 传入，
@@ -145,14 +174,24 @@ GitHub Release（draft）
 ## 4. 本地构建预演
 
 ```bash
-# 安装打包依赖
-uv sync --all-packages --group build
+# 安装打包依赖，并强制重装工作区包（版本号改了就必须做，见 §6）
+uv sync --all-packages --group build \
+  --reinstall-package mograb --reinstall-package mograb-cli --reinstall-package mograb-api
+
+VERSION=$(uv run python scripts/version.py show)
 
 # 构建 CLI（PyInstaller onedir）
-uv run python scripts/build.py cli --version 0.1.0
+uv run python scripts/build.py cli --version "$VERSION"
 
-# 构建 Desktop 后端 sidecar
-uv run python scripts/build.py backend --version 0.1.0
+# 构建 Desktop 后端 sidecar（必须在 electron-builder 之前，它要放进 resources/）
+uv run python scripts/build.py backend --version "$VERSION"
+
+# 验证产物里的版本号没写错
+./release-artifacts/MoGrab-CLI/mog.exe --version    # 应输出 $VERSION
+
+# 桌面端（NSIS + ZIP）
+(cd apps/desktop && npx electron-builder --win --publish never \
+  --config.extraMetadata.version="$VERSION")
 
 # 生成校验和
 uv run python scripts/release.py checksums --dir release-artifacts
@@ -161,7 +200,7 @@ uv run python scripts/release.py checksums --dir release-artifacts
 uv run python scripts/release.py verify --dir release-artifacts
 
 # 提取发布说明
-uv run python scripts/release.py notes --version 0.1.0
+uv run python scripts/release.py notes --version "$VERSION"
 
 # 清理
 uv run python scripts/build.py clean
@@ -177,7 +216,7 @@ uv run python scripts/build.py clean
 | 依赖漏洞扫描 | `pip-audit` 或 GitHub Dependabot | 评估报告 P3-06 |
 | EPUB 规范校验 | 对生成的 EPUB 运行 `epubcheck` | ADR-0003 |
 | 导入边界检查 | 禁止 `mograb.domain` 依赖基础设施、`mograb.export` 依赖 `mograb.network` | ADR-0001 |
-| Desktop CI（lint/build） | Electron 侧的 lint 与打包验证 | CI |
+| Desktop lint | 目前只有 tsc 类型检查 + SSE 解析器测试，没有 ESLint | CI |
 | 缓存 CI 产物 | 加速重复构建 | — |
 
 ---
@@ -210,3 +249,36 @@ Windows 上目录叫 `mog`、可执行文件叫 `mog.exe`，不冲突；Linux �
 结果报了 521 条断链 —— 全部来自 `apps/desktop/node_modules/` 里第三方包自带的
 README，它们本来就不保证自己的相对链接有效。`scripts/check_docs.py` 里有一份
 `SKIP_DIRS`，新加需要排除的目录时改那里。
+
+**改了 `VERSION` 之后必须强制重装工作区包。** editable 安装的元数据是缓存的：
+`uv sync` 不会因为 `VERSION` 变了就重装，`.dist-info` 里还是旧版本号。
+而 PyInstaller 用 `--copy-metadata` 把那份元数据拷进产物 —— 于是打出来的 exe
+报一个**错误的版本号，而且不报错**。CI 是全新环境所以碰不到，本地反复构建时
+必踩。`scripts/build.py` 的 `verify_metadata_version()` 现在会拦下来并打印
+该执行的重装命令。
+
+**发布说明别用内联 awk 提取。** 原先在 Release 工作流里用 awk 从 CHANGELOG
+切段落，正则里的反斜杠要穿过 YAML → bash → awk 三层转义。少一层就变成
+`^## [?1.0.0rc0]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
+`flag` 永远是 0，最后把**整份 CHANGELOG（连版本规划表）**当成发布说明，
+而且不报错。现在走 `scripts/release.py notes`，`re.escape` 过的正则，
+`tests/unit/test_release_script.py` 盯着。
+
+**PEP 440 和 semver 对预发布版本的写法不一样。** Python 侧是 `1.0.0rc0`，
+Node 生态要的是 `1.0.0-rc.0`。项目只有一个 `VERSION` 文件，所以**统一用
+PEP 440**，不去转换：转换只会让产物名和包内版本不一致，而换来的好处有限 ——
+electron-builder 本来就接受 `1.0.0rc0`（它内部用 `parseInt` 切版本号，
+`0rc0` 被截成 `0`，不报错）。
+
+代价是 Windows PE 的 `ProductVersion` 字段：它只能是数值四元组，
+所以 `1.0.0rc0` 会被写成 `1.0.0.0`。**`FileVersion` 字段是对的**（保留 `rc0`），
+在文件属性里能看到。这是 Windows 的固有限制，不是可以绕过的 bug。
+
+**产物里绝不能带 `data/`。** 程序跑起来会在可执行文件旁边建 `data/`
+（数据库、缓存、**API 令牌**）。打包前只要有人跑过一次那个 exe，
+这份数据就会被原样打进发布包 —— `data/token` 是访问令牌，
+**所有装这个包的用户会共用同一个**，鉴权等于没做。
+
+两道防线：`scripts/build.py` 的 `strip_runtime_data()` 在构建收尾时删掉它
+（并打印警告 —— CI 里出现这行日志就说明有人提前跑了 exe），
+`apps/desktop/package.json` 的 `extraResources.filter` 里再排一次 `!data/**`。
