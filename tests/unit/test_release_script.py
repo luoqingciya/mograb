@@ -39,7 +39,11 @@ class TestExtractNotes:
         notes = release_module.extract_notes(version)
 
         assert notes.startswith(f"## [{version}]")
-        assert "预发布版本" in notes
+        # 只断言「有实质内容」，不断言具体措辞 ——
+        # 原先这里钉的是 `"预发布版本" in notes`，那是 rc0 那句话里的词，
+        # 换一版就挂。发版说明的措辞每次都不一样，钉不住也不该钉。
+        assert len(notes) > 200
+        assert "### " in notes
 
     def test_只取本版本段落(self, release_module) -> None:
         """不能把下一个二级标题的内容也带进来。"""

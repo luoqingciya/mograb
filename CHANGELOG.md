@@ -5,7 +5,7 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
-## [未发布]
+## [1.0.0rc1] - 2026-10-05
 
 写第一个真实站点书源（`bqgnovels.com`）时暴露出来的问题。**四个引擎缺口
 加一个真 bug**，都已修复。
@@ -34,8 +34,6 @@ result:
 `max_pages`。**到达上限会记 WARNING** —— 不能静默截断。
 `reverse` 改为在所有页面抓完之后才应用。见规范 §5.4。
 
-### 新增
-
 **`mog find` —— 在已下载的章节正文里搜关键词。** 和 `mog search` 是两件事：
 
 - `mog search <关键词>` —— 去**书源**上搜书，找的是「哪本书」
@@ -59,8 +57,6 @@ JSONPath 传进去直接抛 `SelectorSyntaxError`。于是 `format: json` 只有
 现在按**规则类型**分流（不是按 `document.kind`，书源可能对 HTML 响应声明
 JSONPath）。`list` 的 JSONPath 匹配到数组时按元素展开，所以 `$.data.list`
 和 `$.data.list[*]` 等价。
-
-### 新增
 
 **`mog source test` —— 用离线快照跑一遍书源规则。** 比 `lint` 多查一层：
 **提取结果是否为空**。
@@ -197,6 +193,34 @@ robots.txt 的 `Disallow: /api*` 与 `Disallow: /search*` 两条同时命中**�
 
 搜索实测可用（`mog search 剑来` 返回 3 条真实结果）。响应信封最初是按
 首页 SSR 载荷推断的，实测确认与书籍列表接口同构。
+
+### 文档
+
+全量过了一遍文档，修掉几处**会让人照做就失败**的错误：
+
+**分支策略是错的。** `CONTRIBUTING.md`、开发指南、CI 文档三处都写着
+「从 `develop` 创建分支、PR 到 `develop`」，但**仓库从来只有 `main`**。
+照着做的人在第一步就卡住。CI 工作流自己也列了 `develop` 作为触发分支 ——
+死配置，一并清掉。
+
+**README 说「所有测试都是离线的，还没在真实站点跑过完整下载」。** 这已经
+不对了：真实站点跑通过一本（`bqgnovels.com`，1453 章目录 + 端到端下载）。
+rc 的理由改成准确的版本：**真实站点只验证过一个，而且是最简单的一类**。
+
+**存储文档说 `previous_version`「用于回滚」。** 回滚已明确不做。改成
+「纯诊断用」并说明原因。
+
+**API README 完全没提认证。** 所有业务端点都要求 Bearer 令牌，这是调用者
+最需要知道的事。补上了令牌来源、为什么不用查询参数、以及回环地址为什么
+不构成信任边界。
+
+其余修正：`/health` 示例里的版本号、`mog source lint` 的示例输出、
+CLI 命令清单（补 `show` / `remove` / `enable` / `disable` / `rescan` /
+`token` / `find`）、模块地图补 `app.py`、领域模型补 `BookStatus` 的取值来源、
+存储文档补本地全文搜索一节、CI 文档补 `source test` 步骤。
+
+`CONTRIBUTING.md` 里还有一处 Markdown 表格串行（`chore` 那行和 scope 表
+粘成了一行），也修了。
 
 649 个测试，覆盖率 85%。
 
@@ -355,7 +379,6 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 任务页创建时立刻订阅 SSE，于是把相对路径解析成了 `file:///D:/tasks/events`，
 被 CSP 拦下。现在改成「拿到后端地址之后才建视图」，启动期间显示占位内容。
 
-
 ### 相对原规划书的改动
 
 规划书里有几处自相矛盾或者没做选择的地方，这一版做了裁决：
@@ -391,12 +414,15 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 | 版本 | 目标 | 状态 |
 |------|------|------|
 | v0.1.0 | 能完整下载一本小说 | 已达成 |
-| v0.2.0 | 能稳定下载大量章节 | 已达成（未在真实站点验证） |
-| v0.3.0 | 第三方能写书源并维护 | 部分（缺 Source Registry） |
+| v0.2.0 | 能稳定下载大量章节 | 已达成（真实站点 1453 章验证） |
+| v0.3.0 | 第三方能写书源并维护 | 已达成（Registry / 回滚明确不做） |
 | v0.4.0 | API 成为正式接口 | 已达成 |
 | v0.5.0 | CLI 在 Windows / Linux 上独立可用 | 已达成 |
 | v0.6.0 | Windows 桌面端 Beta | 进行中 |
 | v0.7.0 | 输出质量和性能 | 部分（缺封面与元数据模板） |
 | v1.0.0 | 规范、API、CLI 命令全部稳定 | 本版是它的 rc |
 
+各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
+
+[1.0.0rc1]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc1
 [1.0.0rc0]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc0

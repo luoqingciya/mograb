@@ -8,10 +8,12 @@
 name: CI
 
 on:
+  # 只有 main。早期文档和这里都写过 develop，但那个分支从来不存在 ——
+  # 留着会让读的人以为有两条长期分支。
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

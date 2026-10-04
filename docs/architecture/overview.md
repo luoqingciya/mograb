@@ -50,6 +50,7 @@ MoGrab/
 │   └── mograb/                 核心库，唯一
 │       ├── pyproject.toml
 │       └── src/mograb/
+│           ├── app.py          composition root，CLI 与 API 共用的装配入口
 │           ├── domain/         领域模型，最稳定的部分
 │           ├── source/         书源加载、校验、执行
 │           ├── network/        HTTP、缓存、限流、重试

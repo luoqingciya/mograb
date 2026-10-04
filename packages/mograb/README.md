@@ -8,8 +8,9 @@ MoGrab 核心引擎：声明式书源（Source DSL）、网络层、任务引擎
 
 | 模块 | 职责 |
 |------|------|
+| `mograb.app` | composition root：CLI 与 API 共用的装配入口 |
 | `mograb.domain` | 领域模型（Book / Chapter / Source / Task） |
-| `mograb.source` | 书源加载、校验、执行 |
+| `mograb.source` | 书源加载、校验、执行、fixture 测试 |
 | `mograb.network` | HTTP 客户端、缓存、限流、重试 |
 | `mograb.task` | 队列、Worker 池、调度、生命周期 |
 | `mograb.content` | 正文清洗、规范化、校验 |

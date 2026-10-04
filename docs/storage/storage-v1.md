@@ -93,10 +93,17 @@ settings     （键值）
 | `capabilities` | JSON | NOT NULL | 能力列表 |
 | `enabled` | BOOL | NOT NULL | 是否启用 |
 | `installed_version` | TEXT | NOT NULL | 当前安装版本 |
-| `previous_version` | TEXT | | 上一版本（用于回滚） |
+| `previous_version` | TEXT | | 上一版本号，**纯诊断用**（见下） |
 | `health` | TEXT | NOT NULL | healthy / degraded / broken / unsupported / unknown |
 | `installed_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
+
+> **`previous_version` 不用于回滚。** 回滚已明确不做，旧版本的定义文件也不保留
+> （磁盘上只有单个 `data/sources/<id>/source.yaml`，新版本直接覆盖）。
+> 这一列只记录「上一次装的是哪个版本」，`mog source show` 显示成
+> 「版本变更 1.0.0 → 1.0.1」。
+>
+> 早期文档和 CLI 提示都写成「可回滚到 X」，那是错的 —— 命令根本不存在。
 
 ---
 
@@ -282,7 +289,7 @@ class BookRepository(Protocol):
 |------|------|------|
 | `SourceRepository` | `SqliteSourceRepository` | 书源安装 / 启停 / 卸载，见 §4.3 |
 | `BookRepository` | `SqliteBookRepository` | |
-| `ChapterRepository` | `SqliteChapterRepository` | |
+| `ChapterRepository` | `SqliteChapterRepository` | 含本地全文搜索 `search_content`（见 §4.5） |
 | `TaskRepository` | `SqliteTaskRepository` | 与 `mograb.task.manager.TaskRepository` 一致 |
 | `ExportRepository` | `SqliteExportRepository` | 导出作业状态 |
 | `SettingsRepository` | `SqliteSettingsRepository` | |
@@ -337,6 +344,29 @@ class BookRepository(Protocol):
 
 `content` 用 `LargeBinary` 存原始字节，不做文本化 —— 正文可能是 GBK 编码的
 字节流，当文本存会坏。
+
+### 4.5 本地全文搜索
+
+`ChapterRepository.search_content(keyword, *, book_id=None, limit=50)`
+是 `mog find` 的底座：在**已下载**的章节正文里找关键词，纯本地、不联网。
+
+```python
+async def search_content(...) -> list[ChapterSearchHit]: ...
+```
+
+返回 `ChapterSearchHit`（`book_id` / `book_title` / `chapter_id` /
+`chapter_title` / `chapter_index` / `snippet`）。**只返回片段，不返回整章正文** ——
+一本几千章的书，搜一次就把几十兆正文读进内存是不可接受的。
+
+两个实现要点：
+
+- **关键词里的 `%` 和 `_` 必须转义**（配合 `LIKE ... ESCAPE '\'`）。
+  否则搜「100%」会退化成「100 开头且后面任意」，搜「a_b」会连「axb」一起命中。
+- **空关键词直接返回空**。`LIKE '%%'` 会命中一切。
+
+> **已知限制**：`LIKE '%kw%'` 用不上索引，是全表扫描。个人书库规模够用
+> （几十兆正文约百毫秒级）；库再大就该上 FTS5 虚拟表，那要改 schema，
+> 属于另一件事。指定 `book_id` 能把扫描范围缩到一本书。
 
 ---
 

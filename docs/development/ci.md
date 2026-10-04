@@ -8,7 +8,7 @@
 ## 1. CI 流程
 
 ```
-push / PR → main, develop
+push / PR → main
         ↓
 ┌───────────────────────────────────────────┐
 │ lint          ruff check + format --check │
@@ -16,7 +16,7 @@ push / PR → main, develop
 │ version       VERSION 格式与来源唯一性     │
 │ type-check    pyright                     │
 │ test          矩阵：{3.11,3.12} × {linux,windows} │
-│ source-lint   tests/fixtures 下的参考书源   │
+│ source-lint   参考书源 lint + 真跑一遍提取 │
 │ build         uv build --all-packages     │
 │ desktop       npm ci + tsc + SSE 解析器测试 │
 └───────────────────────────────────────────┘
@@ -31,7 +31,7 @@ push / PR → main, develop
 | desktop job 设 `ELECTRON_SKIP_BINARY_DOWNLOAD` | 类型检查、tsc 编译和 SSE 解析器测试都用不到 Electron 二进制，省一次上百兆的下载 |
 | `version` 独立成 job | 版本号来源出问题会让发版直接失败，值得单独可见 |
 | 文档内链校验并入 `lint` | 纯标准库脚本，不需要单独装环境；归在 lint 语义下也说得通 |
-| `source-lint` 独立成 job | 书源问题与代码问题分开定位 |
+| `source-lint` 独立成 job | 书源问题与代码问题分开定位。这一步既跑 `lint` 也跑 `source test` —— 前者只查规则能不能编译，后者真跑一遍提取，才查得出「选择器写错了、匹配不到东西」 |
 | `-m "not network"` | 测试默认离线，不依赖外部站点可用性 |
 | `concurrency.cancel-in-progress` | 同分支的旧运行自动取消，省额度 |
 

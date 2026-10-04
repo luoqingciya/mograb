@@ -160,10 +160,11 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "version": "0.1.0.dev0" }
+{ "status": "ok", "version": "1.0.0rc1" }
 ```
 
 Desktop 启动时轮询此端点。**不需要令牌** —— 它只回答「有没有实例在跑」和版本号。
+`version` 是引擎自己的版本（读自包元数据），不是书源版本。
 
 ---
 
@@ -182,6 +183,9 @@ GET /api/v1/sources
     "name": "Example",
     "version": "1.0.0",
     "spec_version": 1,
+    "homepage": "https://example.com",
+    "repository": null,
+    "description": "官方参考书源",
     "capabilities": ["search", "book", "chapters", "content"],
     "enabled": true,
     "health": "healthy",
@@ -190,6 +194,12 @@ GET /api/v1/sources
   }
 ]
 ```
+
+`repository` 是**书源自身的发布地址**，不是被采集的站点（那是 `homepage`）。
+MoGrab 不做远端版本检查，这个字段只是给用户一个更新入口。见规范 §2.3。
+
+`previous_version` 是**纯诊断字段**：回滚没有实现，旧版本定义文件也不保留，
+不要拿它做「可回退」的承诺。
 
 #### 安装书源
 

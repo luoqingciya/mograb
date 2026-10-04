@@ -31,8 +31,8 @@ uv run pre-commit install       # 安装 Git 钩子
 ### 1.3 验证环境
 
 ```bash
-uv run mog --version            # mog (MoGrab) 0.1.0.dev0
-uv run pytest -q                # 176 passed
+uv run mog --version            # mog (MoGrab) 1.0.0rc1
+uv run pytest -q                # 649 passed
 uv run ruff check .             # All checks passed!
 uv run pyright                  # 0 errors
 ```
@@ -90,11 +90,20 @@ uv add --group dev pytest-benchmark    # 加到开发依赖组
 ```bash
 uv run python scripts/version.py show           # 看当前版本
 uv run python scripts/version.py check          # 校验格式和来源唯一性
-uv run python scripts/version.py set 0.2.0.dev0 # 改版本
+uv run python scripts/version.py set 1.0.0rc2   # 改版本
+uv run python scripts/version.py flags          # 输出版本属性（CI 用）
 ```
 
-`set` 会把输入规范化成 PEP 440 的标准写法（比如 `0.1.0.DEV0` 会变成
-`0.1.0.dev0`）。
+`set` 会把输入规范化成 PEP 440 的标准写法（比如 `1.0.0.rc1` 会变成
+`1.0.0rc1`）。**改完必须强制重装工作区包**，否则产物带旧版本号且不报错：
+
+```bash
+uv sync --all-packages --group build \
+  --reinstall-package mograb --reinstall-package mograb-cli --reinstall-package mograb-api
+```
+
+`scripts/build.py` 会拦这种情况，版本对不上直接报错。原因见
+[CI 与发布 §6](ci.md#6-踩过的坑)。
 
 别在源码里写 `__version__ = "..."`，`scripts/version.py check` 会报错，
 `tests/unit/test_version.py` 也会失败。
@@ -117,7 +126,9 @@ uv run pyright                                 # 类型检查
 
 # CLI
 uv run mog --help
-uv run mog source lint tests/fixtures/example-source/source.yaml
+uv run mog source lint tests/fixtures/example-source/source.yaml   # 只查规则能否编译
+uv run mog source test tests/fixtures/example-source               # 真跑一遍提取
+uv run mog find 关键词                                             # 搜本地已下载的正文
 uv run mog config path
 
 # API
@@ -210,12 +221,14 @@ fastapi 等基础设施库。这是架构边界的核心（见架构总览 §3.2
 **不搞过于复杂的 Git Flow。**
 
 ```
-main         稳定版本，只接受来自 develop 的合并
-develop      PR 的默认目标分支
+main         唯一长期分支。PR 都合到这里，发布也从这里打 tag
 feature/*    新功能
 fix/*        缺陷修复
-release/*    发布准备
+release/*    发布准备（可选，通常直接在 main 上打 tag）
 ```
+
+**没有 `develop` 分支** —— 早期文档里写过，但仓库从来只有 `main`。
+照着那份文档做的人会在第一步就卡住。
 
 ### 6.1 提交信息
 
@@ -238,29 +251,33 @@ docs(spec): 冻结 Source Specification v1
 
 ### 6.2 版本与发布
 
+各里程碑的**实际**达成情况看 [项目进度](../progress.md) —— 那里是唯一出处，
+这里不再重复维护一份状态表（之前散在四处，改一处忘三处）。
+
+发版流程见 [CI 与发布 §3](ci.md#3-发布流程)。要点：
+
+```bash
+uv run python scripts/version.py set X.Y.Z   # 改 VERSION
+uv sync --all-packages --group build \
+  --reinstall-package mograb --reinstall-package mograb-cli --reinstall-package mograb-api
+git commit -am "chore(release): ..."
+git tag vX.Y.Z && git push origin vX.Y.Z     # 推 tag 即发布
 ```
-v0.1.0  Core Prototype
-v0.2.0  Task System
-v0.3.0  Source Ecosystem
-v0.4.0  API
-v0.5.0  CLI
-v0.6.0  Desktop
-v0.7.0  EPUB / Polish
-v1.0.0  规范稳定
-```
+
+版本号里带 `a` / `b` / `rc` / `dev` 时会自动标成 GitHub prerelease。
 
 ---
 
 ## 7. 贡献流程
 
-1. Fork 并从 `develop` 创建 `feature/*` 分支
+1. Fork 并从 `main` 创建 `feature/*` 分支
 2. 实现功能 + 补充测试
 3. 本地通过全部检查：
    ```bash
    uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
    uv run python scripts/check_docs.py    # 改过文档才需要
    ```
-4. 提交 PR 到 `develop`，说明动机、方案与测试情况
+4. 提交 PR 到 `main`，说明动机、方案与测试情况
 5. 涉及架构决策的改动，需同时提交 ADR
 
 ### 7.1 书源

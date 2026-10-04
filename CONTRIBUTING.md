@@ -137,12 +137,13 @@ uv run python scripts/check_docs.py
 ### 分支策略
 
 ```
-main         稳定版本
-develop      PR 的目标分支
+main         唯一长期分支。PR 都合到这里，发布也从这里打 tag
 feature/*    新功能
 fix/*        缺陷修复
-release/*    发布准备
+release/*    发布准备（可选，通常直接在 main 上打 tag）
 ```
+
+**没有 `develop` 分支** —— 早期文档里写过，但仓库从来只有 `main`。
 
 ### 提交信息
 
@@ -161,7 +162,9 @@ release/*    发布准备
 | `perf` | 性能优化 |
 | `test` | 测试 |
 | `build` / `ci` | 构建与 CI |
-| `chore` | 杂项 | | scope | 范围 |
+| `chore` | 杂项 |
+
+| scope | 范围 |
 |-------|------|
 | `core` `source` `network` `task` `storage` `content` `export` | 核心模块 |
 | `cli` `api` `desktop` | 应用 |
@@ -177,7 +180,7 @@ docs(spec): 冻结 Source Specification v1
 
 ### PR 检查清单
 
-- [ ] 从 `develop` 创建分支
+- [ ] 从 `main` 创建分支
 - [ ] 代码通过全部本地检查
 - [ ] 新增/修改的功能有对应测试
 - [ ] 涉及公开接口变更时同步更新 `docs/`
