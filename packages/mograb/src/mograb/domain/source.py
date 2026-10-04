@@ -433,7 +433,11 @@ class SourceSpec(BaseModel):
     id: str = Field(description="书源唯一 ID")
     name: str
     version: str = Field(description="书源自身的语义化版本，如 1.2.0")
-    homepage: str | None = None
+    homepage: str | None = Field(default=None, description="被采集站点的首页")
+    repository: str | None = Field(
+        default=None,
+        description="书源自身的发布地址（仓库 / 发布页），供用户自行获取新版",
+    )
     description: str | None = None
     license: str | None = Field(default=None, description="书源自身的许可证标识")
     authors: list[str] = Field(default_factory=list)

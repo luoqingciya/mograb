@@ -16,11 +16,11 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 627 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 650 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 6,500 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 6,880 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（7 个 job） | `gh run list` |
@@ -33,7 +33,7 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 |------|------|------|-------|
 | v0.1.0 | Core Prototype | **达成** | — |
 | v0.2.0 | Task System | **基本达成** | 大量章节的稳定性没在真实站点验证过 |
-| v0.3.0 | Source Ecosystem | **部分** | `mog source test`、Registry、真正的版本历史与回滚 |
+| v0.3.0 | Source Ecosystem | **达成（有取舍）** | Registry / 回滚 / 远端更新已明确不做，改用 `repository` 字段 |
 | v0.4.0 | API | **达成** | — |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
 | v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
@@ -67,28 +67,40 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 目标：第三方开发者可以编写和维护 Source。
 
 ```
-✓ Source Linter          ✗ Source Test（CLI 命令）
-✓ Fixture Test           ✗ Registry
-✓ Source Version         ⚠ Update（记版本但不留旧文件）
-✓ Install                ✗ Rollback（见下）
+✓ Source Linter          ✓ Source Test（mog source test）
+✓ Fixture Test           ✗ Registry（已明确不做，见下）
+✓ Source Version         ✓ Install
+✓ Update（覆盖式）        ✗ Rollback（已明确不做，见下）
 ```
 
-**Rollback 是「假承诺」，比单纯缺失更糟。** `sources` 表里有
-`installed_version` / `previous_version` 两列，install 也确实会把旧版本号记进去，
-`mog source show` 于是会打印「可回滚到 1.0.0」。但实际上：
+**`mog source test` 已实现。** 用 `fixtures/cases.yaml` 声明「每个能力用哪个
+快照」，逐能力真跑一遍提取。比 lint 多查一层：**提取结果是否为空** ——
+选择器写错时 lint 发现不了，规则照样能编译，只是匹配不到东西，
+而站点改版最常见的失效方式正是这个。
 
-1. **没有 `mog source rollback` 命令** —— 试了，报 `No such command`
-2. **旧版本的定义文件根本没保留** —— 磁盘上是 `data/sources/<id>/source.yaml`
-   单个文件，新版本直接覆盖。规划书 §56 要的 `1.2.0/` `1.1.0/` `current`
-   目录结构不存在
+只接受路径不接受 ID：快照是开发期产物，安装时不复制到数据目录。
+规划书 §51 写的是传 ID，这里裁决为统一成路径，传 ID 时给明确指引。
 
-所以那句「可回滚到 X」是**误导** —— 它给了错误的安全感，用户会以为
-升级出问题能退回去。**要么把回滚做出来，要么把那行提示去掉**，
-不能停在中间状态。
+### 明确不做的三件事（2026-10-05 决定）
 
-install 本身是稳的：装之前先 lint，有 ERROR 就拒绝（除非 `--force`），
-所以「装一个跑不起来的书源」不会发生。但**lint 通过、运行时才发现站点改版**
-的情况仍会直接覆盖，没有退路。
+| 项 | 决定 | 理由 |
+|----|------|------|
+| 远端版本检查 / 下载 | **不做** | 需要一整套分发协议（Registry、版本协商、签名校验），是个独立课题 |
+| 版本回滚 | **不做** | 要改磁盘布局保留多版本定义，收益不抵复杂度 |
+| 升级失败保留旧版本 | **不做** | 同上 |
+
+**替代方案：`repository` 字段。** `SourceSpec` 新增可选的 `repository`
+（书源自身的发布地址），`mog source show` 会显示它并提示「需要新版就去这里取，
+重新 install 即可覆盖」。更新入口交给用户，不做自动化。
+
+**同时修掉了一处误导。** 原先 `mog source show` 会打印「可回滚到 1.0.0」——
+但 `rollback` 命令不存在，旧版本定义文件也被直接覆盖（磁盘上只有单个
+`source.yaml`，规划书 §56 要的 `1.2.0/` `1.1.0/` `current` 目录结构不存在）。
+那句话给了错误的安全感。现在改成中性的「版本变更 1.0.0 → 1.0.1」，
+`previous_version` 降级为纯诊断字段。
+
+**Registry 仍然空着。** 它和「远端版本检查/下载」是同一件事的两面 ——
+既然后者明确不做，Registry 也就没有存在的基础。全仓库目前零实现。
 
 ### v0.4.0 逐项
 
@@ -186,8 +198,11 @@ install 本身是稳的：装之前先 lint，有 ERROR 就拒绝（除非 `--fo
 1. **再验证几个不同类型的真实站点** —— 补上 JS 渲染、反爬、GBK 编码、
    页码式翻页这几类，才能说「书源规范够用」。
 2. **桌面端补全页面** —— 书架、书源管理、设置。架构已验证，照着加就行。
-3. **Source Registry** —— 让书源能分发和更新。
-4. **Alembic 迁移** —— 趁 schema 还简单，把迁移链路搭起来。
+3. **Alembic 迁移** —— 趁 schema 还简单，把迁移链路搭起来。
+
+> Source Registry 原排在第三位，现已明确不做（见 v0.3.0 一节）——
+> 它和「远端版本检查/下载」是同一件事的两面，书源分发交给
+> `repository` 字段 + 用户自行安装。
 
 ## 已完成的重要节点
 

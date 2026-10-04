@@ -27,6 +27,7 @@ class SourceOut(BaseModel):
     version: str
     spec_version: int
     homepage: str | None = None
+    repository: str | None = None
     description: str | None = None
     capabilities: list[str]
     enabled: bool
@@ -72,6 +73,7 @@ def _to_out(entry: Any) -> SourceOut:
         version=entry.spec.version,
         spec_version=entry.spec.spec_version,
         homepage=entry.spec.homepage,
+        repository=entry.spec.repository,
         description=entry.spec.description,
         capabilities=[c.value for c in entry.spec.capabilities],
         enabled=entry.enabled,

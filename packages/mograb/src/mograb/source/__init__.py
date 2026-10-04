@@ -3,6 +3,14 @@
 
 from .engine import BookDraft, ChapterDraft, Fetcher, ResponseLike, SearchResult, SourceEngine
 from .extractor import Document, Extractor, ExtractResult, extract_many, extract_one
+from .fixture import (
+    CaseResult,
+    FixtureCase,
+    FixtureError,
+    cases_path,
+    load_cases,
+    run_cases,
+)
 from .loader import dump_source_yaml, load_source_dict, load_source_file, write_source_file
 from .request import TemplateContext, build_request, find_variables, render
 from .transformer import apply_transforms, apply_transforms_many
@@ -10,12 +18,15 @@ from .validator import Diagnostic, LintReport, Severity, lint
 
 __all__ = [
     "BookDraft",
+    "CaseResult",
     "ChapterDraft",
     "Diagnostic",
     "Document",
     "ExtractResult",
     "Extractor",
     "Fetcher",
+    "FixtureCase",
+    "FixtureError",
     "LintReport",
     "ResponseLike",
     "SearchResult",
@@ -25,13 +36,16 @@ __all__ = [
     "apply_transforms",
     "apply_transforms_many",
     "build_request",
+    "cases_path",
     "dump_source_yaml",
     "extract_many",
     "extract_one",
     "find_variables",
     "lint",
+    "load_cases",
     "load_source_dict",
     "load_source_file",
     "render",
+    "run_cases",
     "write_source_file",
 ]

@@ -15,6 +15,7 @@ id: example
 name: Example
 version: 1.0.0
 homepage: https://example.com
+repository: null
 description: 官方参考书源，演示 MoGrab Source DSL v1 的全部能力。
 license: GPL-3.0-only
 authors:

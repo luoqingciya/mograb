@@ -73,6 +73,7 @@ transforms:   [...]
 | `name` | str | 是 | 展示名 |
 | `version` | str | 是 | **书源自身**的语义化版本，如 `1.2.0` |
 | `homepage` | str | 否 | 来源站点首页 |
+| `repository` | str | 否 | **书源自身**的发布地址（仓库 / 发布页）。见 §2.3 |
 | `description` | str | 否 | 用途说明 |
 | `license` | str | 否 | 书源自身的许可证标识（SPDX） |
 | `authors` | list[str] | 否 | 作者列表 |
@@ -92,6 +93,22 @@ transforms:   [...]
 
 理由：书源由社区贡献，拼写错误（如 `capabilites`）若被静默忽略，
 会造成「书源看起来正常但某能力不生效」的隐蔽故障。
+
+### 2.3 `homepage` 与 `repository` 的区别
+
+两个都是 URL，但指向完全不同的东西，别写混：
+
+| 字段 | 指向 | 例子 |
+|------|------|------|
+| `homepage` | **被采集的站点** | `https://www.example-novels.com` |
+| `repository` | **书源自身的发布地址** | `https://github.com/me/mograb-sources` |
+
+**MoGrab 不做远端版本检查，也不会自动下载更新。** 那需要一整套分发协议
+（Registry、版本协商、签名校验），目前不在范围内。
+
+`repository` 的作用是**给用户一个更新入口**：`mog source show` 会显示它，
+并提示「需要新版就去这里取，重新 install 即可覆盖」。不填就什么都不显示 ——
+对只在本地用、不分发的书源，留空即可。
 
 ---
 
@@ -571,21 +588,73 @@ my-source-1.0.0.mgs   (ZIP)
 
 ---
 
-## 12. 完整示例
+## 12. 完整示例与离线测试
 
-见 `tests/fixtures/example-source/source.yaml`，该示例：
+见 `tests/fixtures/example-source/`，该示例：
 
 - 演示全部四种能力
 - 演示条件化 `url_join`
 - 演示 `clean.remove`
-- 附带 fixture（`fixtures/*.html`）供离线测试
+- 附带 fixture（`fixtures/*.html`）与用例清单（`fixtures/cases.yaml`）
 
-验证：
+### 12.1 验证
 
 ```bash
 uv run mog source lint tests/fixtures/example-source/source.yaml
+uv run mog source test tests/fixtures/example-source
 uv run pytest tests/source -v
 ```
+
+`mog source test` 比 `lint` 多查一层：**提取结果是否为空**。
+
+选择器写错时 lint 是发现不了的 —— 规则照样能编译，只是匹配不到东西。
+站点改版最常见的失效方式正是这个，所以必须真跑一遍提取。
+
+### 12.2 `fixtures/cases.yaml`
+
+用例清单声明「每个能力用什么 URL 触发、喂哪些快照」：
+
+```yaml
+- capability: book
+  url: https://example.com/book/1001
+  files: [book.html]
+
+- capability: chapters
+  url: https://example.com/book/1001
+  # 目录分页时按**请求顺序**依次提供
+  files: [book.html, book-page2.html]
+
+- capability: search
+  url: https://example.com/search
+  keyword: 三体
+  files: [search.html]
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `capability` | 是 | `search` / `book` / `chapters` / `content` |
+| `url` | 是 | 触发该能力的 URL |
+| `files` | 是 | 快照文件名，相对 `fixtures/`；按请求顺序排列 |
+| `keyword` | 否 | `search` 用的关键词，默认 `test` |
+
+**为什么要显式写 `url`**：`chapters` 的目录常常就在书籍页上
+（请求 URL 是 `{{book.url}}`），从文件名猜不出来。而且 `url_join` 需要真实的
+base URL 才能验出「相对地址有没有被补全」。
+
+**为什么 `files` 是列表**：分页书源会连着发多个请求，快照得按顺序喂进去。
+
+### 12.3 `mog source test` 只接受路径
+
+快照是**开发期产物**，`mog source install` 只复制 `source.yaml`，
+不会把 `fixtures/` 带进数据目录 —— 否则每个已安装书源都拖着一份
+会随版本变旧的测试数据。所以测试要在开发目录里跑：
+
+```bash
+cd my-source && mog source test .
+```
+
+（规划书 §51 写的是 `mog source test example`，传 ID。这里裁决为统一成路径，
+传 ID 时会给出明确指引而不是去找一份不存在的快照。）
 
 ---
 

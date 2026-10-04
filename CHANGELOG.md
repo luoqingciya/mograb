@@ -60,7 +60,59 @@ JSONPath 传进去直接抛 `SelectorSyntaxError`。于是 `format: json` 只有
 JSONPath）。`list` 的 JSONPath 匹配到数组时按元素展开，所以 `$.data.list`
 和 `$.data.list[*]` 等价。
 
+### 新增
+
+**`mog source test` —— 用离线快照跑一遍书源规则。** 比 `lint` 多查一层：
+**提取结果是否为空**。
+
+选择器写错时 lint 是发现不了的 —— 规则照样能编译，只是匹配不到东西，
+而站点改版最常见的失效方式正是这个。所以必须真跑一遍提取。
+
+用例写在书源目录的 `fixtures/cases.yaml`，声明每个能力用哪个 URL 触发、
+喂哪些快照：
+
+```yaml
+- capability: chapters
+  url: https://example.com/book/1001
+  # 分页时按**请求顺序**依次提供
+  files: [book.html, book-page2.html]
+```
+
+`url` 必须显式写：`chapters` 的目录常常就在书籍页上（请求 URL 是
+`{{book.url}}`），从文件名猜不出来；而且 `url_join` 需要真实的 base URL
+才能验出「相对地址有没有被补全」。
+
+**只接受路径，不接受书源 ID。** 快照是开发期产物，`install` 只复制
+`source.yaml`，不会把 `fixtures/` 带进数据目录 —— 否则每个已安装书源都拖着
+一份会随版本变旧的测试数据。所以测试在开发目录里跑：`mog source test .`。
+（规划书 §51 写的是传 ID，这里裁决为统一成路径，传 ID 时给出明确指引。）
+
+**`repository` 字段 —— 更新入口交给用户。** 书源可以声明自己的发布地址，
+`mog source show` 会显示它并提示「需要新版就去这里取，重新 install 即可覆盖」。
+MoGrab **不做远端版本检查、不做自动下载、不做回滚** —— 那需要一整套分发协议
+（Registry、版本协商、签名校验），是个独立课题，收益不抵复杂度。
+不填就什么都不显示。
+
 ### 修复
+
+**`mog source show` 声称「可回滚到 X」，但回滚根本不存在。** `sources` 表里
+`installed_version` / `previous_version` 两列都在且已接线，install 确实会记
+旧版本号，于是 CLI 会打印「可回滚到 1.0.0」。但：
+
+- `mog source rollback` **命令不存在**（实测报 `No such command`）
+- **旧版本定义文件也没保留** —— 磁盘上只有单个 `data/sources/<id>/source.yaml`，
+  新版本直接覆盖。规划书 §56 要的 `1.2.0/` `1.1.0/` `current` 目录结构不存在
+
+这比单纯缺失更糟：它给了错误的安全感。既然回滚已明确不做，就改成中性的
+「版本变更 1.0.0 → 1.0.1」，`previous_version` 降级为纯诊断字段。
+
+**`mog source lint <不存在的路径>` 报「Schema 校验失败」。** 真正的原因是
+路径写错了。现在先在 CLI 层查存在性，提示「路径不存在」，退出码从 4
+（校验失败）改成 2（参数错误）。
+
+**`mog source test` 的实现里踩了自己的坑**：一开始测试直接往共享的
+示例书源目录里写用例，一条用例把 `cases.yaml` 覆盖了，后续测试全崩。
+现在所有会改文件的测试都在 `tmp_path` 的副本上做 —— 共享夹具只能读。
 
 **`--format` 指定的格式不影响导出文件的扩展名。** `resolve_export_target`
 拿的是**配置里的默认格式**（`epub`）来拼扩展名，而不是本次实际用的格式。
@@ -146,7 +198,7 @@ robots.txt 的 `Disallow: /api*` 与 `Disallow: /search*` 两条同时命中**�
 搜索实测可用（`mog search 剑来` 返回 3 条真实结果）。响应信封最初是按
 首页 SSR 载荷推断的，实测确认与书籍列表接口同构。
 
-626 个测试，覆盖率 85%。
+649 个测试，覆盖率 85%。
 
 ## [1.0.0rc0] - 2026-10-04
 

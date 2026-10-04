@@ -20,7 +20,8 @@
 example-source/
 ├── source.yaml         书源定义
 ├── README.md           本文件
-└── fixtures/           离线测试用 HTML 快照
+└── fixtures/           离线测试
+    ├── cases.yaml      用例清单（mog source test 读它）
     ├── search.html
     ├── book.html
     └── chapter.html
@@ -30,14 +31,26 @@ example-source/
 
 ```bash
 uv run mog source lint tests/fixtures/example-source/source.yaml
+uv run mog source test tests/fixtures/example-source   # 真跑一遍提取
 uv run pytest tests/source -v
 ```
+
+`mog source test` 比 `lint` 多查一层：**提取结果是否为空**。
+选择器写错时 lint 发现不了 —— 规则照样能编译，只是匹配不到东西，
+而站点改版最常见的失效方式正是这个。
+
+`mog source test` **只接受路径**：快照是开发期产物，
+`mog source install` 只复制 `source.yaml`，不会把 `fixtures/` 带进数据目录。
 
 ## 说明
 
 `spec_version` 和 `version` 是两个语义不同的字段：前者是规范版本，
 后者是书源自身的语义化版本。别写混，详见
 `docs/source-spec/source-spec-v1.md`。
+
+`homepage` 指向被采集的站点，`repository` 指向书源自己的发布地址
+（不分发就留 `null`）。MoGrab 不做远端版本检查，`repository` 只是给用户
+一个更新入口。
 
 ## 许可证
 

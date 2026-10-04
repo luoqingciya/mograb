@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# mog source test 的用例清单。
+#
+# 每个能力一条：声明用什么 URL 触发、喂哪个快照。
+# URL 必须显式写 —— chapters 的目录常常就在书籍页上（{{book.url}}），
+# 从文件名猜不出来；而且 url_join 需要真实的 base URL 才能验出
+# 「相对地址有没有被补全」。
+#
+# files 是**按请求顺序**提供的快照列表。目录分页的书源会连着发几个请求，
+# 把每页的快照按顺序列出来即可。
+
+- capability: search
+  url: https://example.com/search
+  keyword: 三体
+  files: [search.html]
+
+- capability: book
+  url: https://example.com/book/1001
+  files: [book.html]
+
+# 目录和详情在同一个页面上，所以复用 book.html
+- capability: chapters
+  url: https://example.com/book/1001
+  files: [book.html]
+
+- capability: content
+  url: https://example.com/book/1001/chapter/1
+  files: [chapter.html]

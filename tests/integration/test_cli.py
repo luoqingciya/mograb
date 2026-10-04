@@ -199,7 +199,15 @@ class TestSourceLint:
         assert json.loads(result.stdout)["result"] == "READY"
 
     def test_lint_missing_file(self, tmp_path: Path) -> None:
-        assert run("source", "lint", str(tmp_path / "nope.yaml")).exit_code == 4
+        """路径写错是**参数错误**（2），不是校验失败（4）。
+
+        以前这里报 4 并打印「Schema 校验失败」—— 真正的原因是路径不存在，
+        提示误导。现在先在 CLI 层查存在性。
+        """
+        result = run("source", "lint", str(tmp_path / "nope.yaml"))
+
+        assert result.exit_code == 2
+        assert "路径不存在" in result.output
 
 
 class TestConfigCommands:
@@ -418,3 +426,110 @@ class TestFindCommand:
 
     def test_缺关键词是参数错误(self) -> None:
         assert run("find").exit_code != 0
+
+
+class TestSourceTest:
+    """``mog source test`` —— 用离线快照跑书源规则。
+
+    只收路径不收 ID：快照是开发期产物，安装时不复制到数据目录。
+    """
+
+    def test_示例书源全通过(self, example_yaml: str) -> None:
+        result = run("source", "test", str(Path(example_yaml).parent))
+
+        assert result.exit_code == 0, result.stdout
+        assert "4/4 通过" in result.stdout
+        assert "PASS" in result.stdout
+
+    def test_json_输出(self, example_yaml: str) -> None:
+        result = run("source", "test", str(Path(example_yaml).parent), "--json")
+
+        assert result.exit_code == 0, result.stdout
+        data = json.loads(result.stdout)
+        assert data["passed"] == 4
+        assert data["failed"] == 0
+        assert [c["capability"] for c in data["cases"]] == [
+            "search",
+            "book",
+            "chapters",
+            "content",
+        ]
+
+    def test_传_ID_给出明确指引(self) -> None:
+        """规划书 §51 写的是 `mog source test example`（传 ID）。
+
+        这里裁决为只收路径 —— 传 ID 时要讲清楚为什么不行、该怎么办，
+        而不是让它去找一份根本不存在的快照。
+
+        用 ``result.output``：Typer 把参数错误写到 stderr，只看 stdout 会是空的。
+        """
+        result = run("source", "test", "example")
+
+        assert result.exit_code == 2
+        assert "只接受书源**目录**" in result.output
+        assert "开发目录" in result.output
+
+    def test_路径不存在(self) -> None:
+        result = run("source", "test", "根本/不存在/的路径")
+
+        assert result.exit_code == 2
+        assert "路径不存在" in result.output
+
+    def test_缺用例文件(self, example_yaml: str, tmp_path: Path) -> None:
+        """只拷 source.yaml，不给 fixtures/cases.yaml。"""
+        lone = tmp_path / "lonely"
+        lone.mkdir()
+        (lone / "source.yaml").write_text(
+            Path(example_yaml).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+        result = run("source", "test", str(lone))
+
+        assert result.exit_code == 4
+        assert "cases.yaml" in result.stdout
+
+
+class TestSourceRepository:
+    """书源的项目地址 —— 不做远端更新，靠它让用户自己去找新版。"""
+
+    def test_未声明时不显示(self, example_yaml: str) -> None:
+        run("source", "install", example_yaml)
+
+        result = run("source", "show", "example")
+
+        assert result.exit_code == 0
+        assert "项目地址" not in result.stdout
+
+    def test_声明后显示(self, example_yaml: str, tmp_path: Path) -> None:
+        text = Path(example_yaml).read_text(encoding="utf-8")
+        # 示例书源里已经是 `repository: null`，要替换掉而不是再插一行 ——
+        # YAML 出现重复键时后一个会盖掉前一个
+        patched = tmp_path / "source.yaml"
+        patched.write_text(
+            text.replace("repository: null", "repository: https://github.com/me/my-sources"),
+            encoding="utf-8",
+        )
+        run("source", "install", str(patched))
+
+        result = run("source", "show", "example")
+
+        assert "项目地址" in result.stdout
+        assert "github.com/me/my-sources" in result.stdout
+        assert "重新 install 即可覆盖" in result.stdout
+
+    def test_不再声称可回滚(self, example_yaml: str, tmp_path: Path) -> None:
+        """回滚没实现、旧版本文件也不保留，所以不能写「可回滚到 X」。"""
+        run("source", "install", example_yaml)
+        bumped = tmp_path / "source.yaml"
+        bumped.write_text(
+            Path(example_yaml)
+            .read_text(encoding="utf-8")
+            .replace("version: 1.0.0", "version: 1.0.1"),
+            encoding="utf-8",
+        )
+        run("source", "install", str(bumped))
+
+        result = run("source", "show", "example")
+
+        assert "可回滚" not in result.stdout
+        assert "版本变更" in result.stdout

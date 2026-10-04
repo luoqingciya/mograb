@@ -9,7 +9,8 @@ import typer
 
 from mograb.domain.enums import HealthStatus
 from mograb.errors import SourceNotFoundError, SourceSchemaError
-from mograb.source import lint, load_source_file
+from mograb.source import lint, load_cases, load_source_file, run_cases
+from mograb.source.fixture import FixtureError
 
 from ._common import command, console, emit, open_app
 
@@ -25,19 +26,49 @@ _HEALTH_MARK = {
 
 
 def _locate_source_file(target: Path) -> Path:
-    """用户给目录时自动找里面的 source.yaml。"""
+    """用户给目录时自动找里面的 source.yaml。
+
+    **先查存在性再交给 loader** —— loader 对不存在的文件抛的是
+    ``SourceSchemaError``，于是 CLI 会打印「Schema 校验失败」，
+    而真正的原因是路径写错了。这个提示误导过一次。
+    """
+    if not target.exists():
+        raise typer.BadParameter(f"路径不存在: {target}")
+
     if target.is_dir():
         candidate = target / "source.yaml"
         if not candidate.is_file():
-            raise SourceSchemaError(
-                f"目录里没有 source.yaml: {target}", details={"path": str(target)}
-            )
+            raise typer.BadParameter(f"目录里没有 source.yaml: {target}")
         return candidate
     return target
 
 
 def _not_found(source_id: str) -> SourceNotFoundError:
     return SourceNotFoundError(f"书源未安装: {source_id}", details={"source_id": source_id})
+
+
+def _resolve_source_file(target: str) -> Path:
+    """把参数解析成 source.yaml 的路径。
+
+    **只接受路径，不接受书源 ID。** 快照（``fixtures/``）是开发期产物，
+    安装时不会复制到数据目录 —— 否则每个已安装书源都拖着一份会随版本变旧的
+    测试数据。所以测试必须在**开发目录**里跑：
+
+        cd my-source && mog source test .
+
+    规划书 §51 里写的是 ``mog source test example``（传 ID），评估报告 P3-02
+    也提过参数风格不统一。这里的裁决是「统一成路径」—— 传 ID 时给出明确指引，
+    而不是让它去找一份根本不存在的快照。
+    """
+    as_path = Path(target)
+    if not as_path.exists():
+        raise typer.BadParameter(
+            f"路径不存在: {target}\n"
+            "mog source test 只接受书源**目录**或 source.yaml 的路径 ——\n"
+            "快照是开发期产物，安装时不会复制到数据目录，所以不能按 ID 测已安装的书源。\n\n"
+            "  cd <书源开发目录> && mog source test ."
+        )
+    return _locate_source_file(as_path)
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +149,7 @@ async def show_source(
             "name": entry.spec.name,
             "version": entry.spec.version,
             "homepage": entry.spec.homepage,
+            "repository": entry.spec.repository,
             "capabilities": [c.value for c in entry.spec.capabilities],
             "permissions": entry.spec.permissions.model_dump(),
             "enabled": entry.enabled,
@@ -135,14 +167,20 @@ async def show_source(
     console.print(f"[bold]{spec.name}[/bold]  ({spec.id} @ {spec.version})")
     if spec.homepage:
         console.print(f"  主页      {spec.homepage}")
+    if spec.repository:
+        console.print(f"  项目地址  {spec.repository}")
     if spec.description:
         console.print(f"  说明      {spec.description}")
     console.print(f"  能力      {', '.join(c.value for c in spec.capabilities)}")
     console.print(f"  允许域名  {', '.join(spec.permissions.network) or '（未声明）'}")
     console.print(f"  状态      {_HEALTH_MARK.get(entry.health, '?')}")
     if entry.previous_version:
-        console.print(f"  可回滚到  {entry.previous_version}")
+        # 只作诊断用，**不要**写成「可回滚到 X」——
+        # 回滚没有实现，旧版本定义文件也不保留，那样写是给用户错误的安全感。
+        console.print(f"  版本变更  {entry.previous_version} → {spec.version}")
     console.print(f"  文件      {path}")
+    if spec.repository:
+        console.print(f"\n[dim]需要新版就去 {spec.repository} 取，重新 install 即可覆盖[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +226,82 @@ def lint_source(
         console.print(f"\nResult: {'[green]READY[/green]' if ready else '[red]BROKEN[/red]'}")
 
     if not report.is_ready:
+        raise typer.Exit(code=4)
+
+
+# ---------------------------------------------------------------------------
+# 离线测试
+# ---------------------------------------------------------------------------
+@app.command("test")
+@command
+async def test_source(
+    target: str = typer.Argument(..., help="书源目录或 source.yaml 的路径"),
+    json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
+) -> None:
+    """用离线快照跑一遍书源规则（**不访问网络**）。
+
+    站点改版后规则会失效，但失效点未必是「选择器写错了」——
+    更常见的是页面结构变了导致提取到空值。lint 查不出这类问题，
+    因为它只看规则本身能不能编译。
+
+    用例写在书源目录的 ``fixtures/cases.yaml``，声明每个能力用哪个快照。
+    只接受路径：快照是开发期产物，不随安装复制。
+    """
+    source_file = _resolve_source_file(target)
+    source_dir = source_file.parent
+    try:
+        spec = load_source_file(source_file)
+    except SourceSchemaError as exc:
+        console.print("[red]Schema 校验失败[/red]")
+        for item in exc.details.get("errors", []):
+            console.print(f"  [red]{item.get('path') or '<根>'}[/red] {item.get('message')}")
+        raise typer.Exit(code=4) from exc
+
+    report = lint(spec)
+    if not report.is_ready:
+        console.print("[red]书源未通过校验，先修 lint 错误[/red]")
+        for diag in report.errors:
+            console.print(f"- {diag.format()}")
+        raise typer.Exit(code=4)
+
+    try:
+        cases = load_cases(source_dir)
+    except FixtureError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=4) from exc
+
+    results = await run_cases(spec, cases, source_dir)
+
+    if json_output:
+        emit(
+            {
+                "source_id": spec.id,
+                "total": len(results),
+                "passed": sum(1 for r in results if r.ok),
+                "failed": sum(1 for r in results if not r.ok),
+                "cases": [
+                    {
+                        "capability": r.capability,
+                        "files": r.case.files,
+                        "url": r.case.url,
+                        "ok": r.ok,
+                        "detail": r.summary,
+                    }
+                    for r in results
+                ],
+            },
+            json_output=True,
+        )
+    else:
+        console.print(f"Source: [bold]{spec.id}[/bold] @ {spec.version}\n")
+        for result in results:
+            mark = "[green]PASS[/green]" if result.ok else "[red]FAIL[/red]"
+            console.print(f"  {mark}  {result.capability:<9} {result.summary}")
+
+        passed = sum(1 for r in results if r.ok)
+        console.print(f"\n{passed}/{len(results)} 通过")
+
+    if any(not r.ok for r in results):
         raise typer.Exit(code=4)
 
 
@@ -397,6 +511,9 @@ id: {source_id}
 name: {name}
 version: 1.0.0
 homepage: https://example.com
+# 书源自身的发布地址。填上之后 `mog source show` 会提示用户去这里取新版 ——
+# MoGrab 不做远端版本检查（那需要一套分发协议），更新靠用户自己。
+repository: null
 description: 待补充
 
 capabilities:
