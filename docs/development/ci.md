@@ -174,3 +174,29 @@ uv run python scripts/build.py clean
 | 导入边界检查 | 禁止 `mograb.domain` 依赖基础设施、`mograb.export` 依赖 `mograb.network` | ADR-0001 |
 | Desktop CI（lint/build） | Electron 侧的 lint 与打包验证 | §48 |
 | 缓存 CI 产物 | 加速重复构建 | — |
+
+---
+
+## 6. 踩过的坑
+
+这几条都是实际踩出来的，改回去会再挂一次。
+
+**`astral-sh/setup-uv` 别用 `@v8` 以上。** 这个仓库从 v8 开始不再打 major tag，
+只有 `v10.2.0` 这种具体版本号。引用 `@v10` 会直接 Not Found，job 在
+"Set up job" 阶段就挂，而且错误信息里看不出原因 —— 表现是九个 job 同时秒失败。
+当前用 `@v7`，这是最后一个有 major tag 的版本。
+
+**Windows runner 上跑 Python 脚本要处理编码。** 控制台默认 cp1252，
+`print` 中文直接抛 `UnicodeEncodeError`。`scripts/` 下的脚本开头都有
+`_force_utf8_output()`，新加脚本记得带上。
+
+**PyInstaller 打出来的 exe 版本号会变成 `0.0.0+unknown`。** 因为它默认不复制
+dist-info，运行时 `importlib.metadata` 找不到包元数据。必须加 `--copy-metadata`。
+
+**Linux 上拍平 PyInstaller 产物会撞名。** 产物固定是 `<distpath>/<name>/`，
+Windows 上目录叫 `mog`、可执行文件叫 `mog.exe`，不冲突；Linux 上两者都是
+`mog`，逐个往外搬时第一个就撞上自己。`scripts/build.py` 的 `flatten_dist()`
+先挪到临时目录再搬，`tests/unit/test_build_script.py` 盯着这段逻辑。
+
+**`uvicorn.run` 别传字符串。** `uvicorn.run("mograb_api.main:app", ...)` 靠运行时
+导入，PyInstaller 静态分析看不到，打出来的 exe 启动就报找不到模块。传 app 对象。
