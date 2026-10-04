@@ -9,27 +9,17 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RELEASE_SCRIPT = REPO_ROOT / "scripts" / "release.py"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 
 
-def _load_release_module():
-    spec = importlib.util.spec_from_file_location("mograb_release_script", RELEASE_SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.fixture(scope="module")
-def release_module():
-    return _load_release_module()
+def release_module(load_script):
+    return load_script("release.py")
 
 
 class TestExtractNotes:

@@ -17,7 +17,7 @@ async def info(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """查看书籍详情与章节统计。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         book = await application.books.get(book_id)
         if book is None:
             raise EntityNotFoundError(f"书籍不存在: {book_id}", details={"book_id": book_id})

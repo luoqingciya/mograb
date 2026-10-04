@@ -18,6 +18,7 @@ push / PR → main
 │ test          矩阵：{3.11,3.12} × {linux,windows} │
 │ source-lint   参考书源 lint + 真跑一遍提取 │
 │ build         uv build --all-packages     │
+│ package-smoke 打 PyInstaller 产物并真跑一遍 │
 │ desktop       npm ci + tsc + SSE 解析器测试 │
 └───────────────────────────────────────────┘
 ```
@@ -32,6 +33,8 @@ push / PR → main
 | `version` 独立成 job | 版本号来源出问题会让发版直接失败，值得单独可见 |
 | 文档内链校验并入 `lint` | 纯标准库脚本，不需要单独装环境；归在 lint 语义下也说得通 |
 | `source-lint` 独立成 job | 书源问题与代码问题分开定位。这一步既跑 `lint` 也跑 `source test` —— 前者只查规则能不能编译，后者真跑一遍提取，才查得出「选择器写错了、匹配不到东西」 |
+| `package-smoke` 独立成 job | **rc1 发出去的 CLI 和桌面端都是坏的**，而构建、CI、发布三道关全都没拦住 —— 因为都只验「构建成功」，没人真执行过产物。这个 job 打一遍 PyInstaller 产物并真的跑起来 |
+| `package-smoke` 只在 Linux 上打 | 这类问题的根因是「模块没被打进去」，与平台无关。Windows 的打包由 Release 工作流在发版前验证 |
 | `-m "not network"` | 测试默认离线，不依赖外部站点可用性 |
 | `concurrency.cancel-in-progress` | 同分支的旧运行自动取消，省额度 |
 
@@ -103,8 +106,8 @@ uv sync --all-packages --group build \
 ### 3.2 触发
 
 ```bash
-git tag v1.0.0rc1
-git push origin v1.0.0rc1
+git tag v1.0.0rc2
+git push origin v1.0.0rc2
 ```
 
 推 tag 就是发布 —— 工作流会直接建一个**公开**的 Release。
@@ -227,12 +230,14 @@ uv run python scripts/build.py clean
 
 **`astral-sh/setup-uv` 别用 `@v8` 以上。** 这个仓库从 v8 开始不再打 major tag，
 只有 `v10.2.0` 这种具体版本号。引用 `@v10` 会直接 Not Found，job 在
-"Set up job" 阶段就挂，而且错误信息里看不出原因 —— 表现是九个 job 同时秒失败。
+"Set up job" 阶段就挂，而且错误信息里看不出原因 —— 表现是多个 job 同时秒失败。
 当前用 `@v7`，这是最后一个有 major tag 的版本。
 
 **Windows runner 上跑 Python 脚本要处理编码。** 控制台默认 cp1252，
-`print` 中文直接抛 `UnicodeEncodeError`。`scripts/` 下的脚本开头都有
-`_force_utf8_output()`，新加脚本记得带上。
+`print` 中文直接抛 `UnicodeEncodeError`。`scripts/_console.py` 里有
+`force_utf8_stdio()`，脚本开头都调用它，新加脚本记得带上
+（只在输出被重定向时改，直接连控制台时不动 —— 那时 CPython 走宽字符 API
+本来就正确）。
 
 **PyInstaller 打出来的 exe 版本号会变成 `0.0.0+unknown`。** 因为它默认不复制
 dist-info，运行时 `importlib.metadata` 找不到包元数据。必须加 `--copy-metadata`。
@@ -244,6 +249,27 @@ Windows 上目录叫 `mog`、可执行文件叫 `mog.exe`，不冲突；Linux �
 
 **`uvicorn.run` 别传字符串。** `uvicorn.run("mograb_api.main:app", ...)` 靠运行时
 导入，PyInstaller 静态分析看不到，打出来的 exe 启动就报找不到模块。传 app 对象。
+
+**「构建成功」不等于「产物能用」—— 必须真跑一遍。** rc1 发出去的 CLI 和
+桌面端**都是坏的**：SQLAlchemy 按字符串导入驱动包 `aiosqlite`，静态分析看不见，
+于是产物能跑 `--version`、能出 `--help`，一碰数据库就
+`ModuleNotFoundError`。构建、CI、发布三道关全都没拦住，因为都只验「构建成功」。
+
+现在 `scripts/build.py` 构建完会自动跑冒烟测试（`smoke_test()`），
+真的执行产物：验版本号、**数据库读写**、数据目录创建、输出编码；
+后端还会起一次服务并带令牌打一个走数据库的端点 ——
+**`/health` 不碰数据库，光看它通不出结论**。CI 的 `package-smoke` job 和
+Release 工作流都会跑它。
+
+**打包后的 exe 会无视 `PYTHONUTF8` / `PYTHONIOENCODING`。** 实测四种组合
+（含 `PYTHONLEGACYWINDOWSSTDIO=0`）全部无效，它按控制台代码页输出，
+中文 Windows 上就是 GBK。于是 `--json` 产出的不是合法 JSON，管道也乱码。
+**而开发态 `uv run` 是 UTF-8** —— 只有用户拿到的包是坏的，本地测不出来。
+修法是代码里显式设，见 `mograb.console.force_utf8_stdio()`。
+
+**PyInstaller 会漏掉动态导入的模块。** 上面那条 aiosqlite 就是。
+判断一个包有没有被打进去**不能看 `_internal/` 里有没有同名目录** ——
+纯 Python 包会被塞进 PYZ，目录里根本不出现。只能真跑一遍。
 
 **扫文档别把 `node_modules` 扫进来。** 第一版内链校验用 `rglob('*.md')` 一路扫下去，
 结果报了 521 条断链 —— 全部来自 `apps/desktop/node_modules/` 里第三方包自带的

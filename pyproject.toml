@@ -117,7 +117,7 @@ indent-style = "space"
 # Pyright：类型检查
 # ---------------------------------------------------------------------------
 [tool.pyright]
-include = ["packages/mograb/src", "apps/cli/src", "apps/api/src"]
+include = ["packages/mograb/src", "apps/cli/src", "apps/api/src", "scripts"]
 exclude = [".venv", "build", "dist", "apps/desktop"]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"

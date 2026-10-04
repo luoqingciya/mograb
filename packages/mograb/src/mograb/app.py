@@ -388,23 +388,25 @@ async def create_application(
     *,
     settings: AppSettings | None = None,
     paths: Paths | None = None,
-    ensure_paths: bool = True,
     log_level: str | None = None,
 ) -> AsyncIterator[Application]:
     """装配出一个可用的应用，退出时自动清理。
 
+    **总是创建数据目录结构。** 这里曾经有个 ``ensure_paths`` 开关，
+    让只读命令跳过创建 —— 那个设计是坏的：``configure_logging`` 无论如何
+    都会建出 ``logs/``，于是结果是 ``data/`` 建了一半（只有 logs），
+    看起来像装坏了。要么全建要么不建，全建的成本是几个空目录。
+
     Args:
         settings: 不传就读配置文件 + 环境变量。
         paths: 不传就按运行目录解析。
-        ensure_paths: 是否创建数据目录。只读命令可以传 False。
         log_level: 覆盖日志级别。CLI 默认要安静，会传 ``WARNING``；
             不传则用配置里的值。
     """
     resolved_settings = settings or load_settings()
     resolved_paths = paths or get_paths()
 
-    if ensure_paths:
-        resolved_paths.ensure()
+    resolved_paths.ensure()
 
     configure_logging(
         level=log_level or resolved_settings.logging.level,

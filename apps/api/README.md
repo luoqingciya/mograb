@@ -40,7 +40,8 @@ GET    /health                      健康检查（无需令牌）
 GET    /docs                        Swagger UI（无需令牌）
 
 /api/v1/sources                     列表 / 安装 / 卸载 / 启停 / 重扫 / 体检
-/api/v1/search                      跨书源搜索
+/api/v1/search                      跨书源搜索（去站点上搜书）
+/api/v1/search/local                在已下载的正文里搜（纯本地）
 /api/v1/books                       书架 / 详情 / 章节 / 增量更新
 /api/v1/tasks                       创建 / 列表 / 详情 / 暂停 / 继续 / 取消 / 重试
 /api/v1/tasks/{id}/events           SSE 单任务事件流
@@ -48,7 +49,7 @@ GET    /docs                        Swagger UI（无需令牌）
 /api/v1/exports                     导出作业
 ```
 
-23 条路径 / 27 个端点。完整契约见 [API v1](../../docs/api/api-v1.md)。
+24 条路径 / 28 个端点。完整契约见 [API v1](../../docs/api/api-v1.md)。
 
 ## 错误模型
 

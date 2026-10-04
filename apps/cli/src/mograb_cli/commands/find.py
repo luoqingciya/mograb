@@ -24,7 +24,7 @@ async def find(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """在已下载的章节正文里搜关键词。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         hits = await application.chapters.search_content(keyword, book_id=book_id, limit=limit)
 
     if json_output:

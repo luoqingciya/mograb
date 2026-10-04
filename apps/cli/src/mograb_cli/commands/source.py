@@ -80,7 +80,7 @@ async def list_sources(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """列出已安装的书源。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         entries = await application.sources.list_all()
 
     emit(
@@ -136,7 +136,7 @@ async def show_source(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """查看书源详情。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         entry = await application.sources.get(source_id)
         path = application.sources.source_path(source_id)
 
@@ -430,7 +430,7 @@ async def doctor(
     默认只做离线检查（定义能否加载、lint 是否通过）。加 ``--live`` 会真的
     访问一次主页 —— 那才说明站点还活着。
     """
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         if source_id:
             entry = await application.sources.get(source_id)
             if entry is None:

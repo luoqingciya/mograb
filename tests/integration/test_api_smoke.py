@@ -384,3 +384,114 @@ class TestExportsApi:
 
     def test_get_missing(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/exports/nope").status_code == 404
+
+
+class TestLocalSearchApi:
+    """``GET /api/v1/search/local`` —— 在已下载的正文里搜。**不访问网络。**
+
+    和 ``GET /api/v1/search`` 是两件事：那个去书源上搜书，这个只查本地库。
+    """
+
+    def test_空库返回空(self, client: TestClient) -> None:
+        response = client.get(f"{API_PREFIX}/search/local", params={"q": "荔枝"})
+
+        assert response.status_code == 200
+        assert response.json() == {"keyword": "荔枝", "total": 0, "items": []}
+
+    def test_命中带片段(self, client: TestClient) -> None:
+        _seed_chapter_for_search()
+
+        body = client.get(f"{API_PREFIX}/search/local", params={"q": "荔枝"}).json()
+
+        assert body["total"] == 1
+        hit = body["items"][0]
+        assert hit["book_title"] == "三体"
+        assert hit["chapter_title"] == "第一章 科学边界"
+        assert "荔枝" in hit["snippet"]
+
+    def test_限定书籍(self, client: TestClient) -> None:
+        _seed_chapter_for_search()
+
+        found = client.get(
+            f"{API_PREFIX}/search/local", params={"q": "荔枝", "book_id": "book_s"}
+        ).json()
+        missing = client.get(
+            f"{API_PREFIX}/search/local", params={"q": "荔枝", "book_id": "nope"}
+        ).json()
+
+        assert found["total"] == 1
+        assert missing["total"] == 0
+
+    def test_缺关键词是参数错误(self, client: TestClient) -> None:
+        assert client.get(f"{API_PREFIX}/search/local").status_code == 422
+
+    def test_需要令牌(self, anon_client: TestClient) -> None:
+        response = anon_client.get(f"{API_PREFIX}/search/local", params={"q": "x"})
+
+        assert response.status_code == 401
+
+
+def _seed_chapter_for_search() -> None:
+    """塞一本书一章正文。走真实应用，和 CLI 那边的做法一致。"""
+    from datetime import UTC, datetime
+
+    from mograb.config import get_paths
+    from mograb.domain.book import Book
+    from mograb.domain.chapter import Chapter
+    from mograb.storage.sqlite import (
+        Database,
+        SqliteBookRepository,
+        SqliteChapterRepository,
+        SqliteSourceRepository,
+    )
+
+    async def go() -> None:
+        database = Database(get_paths().database)
+        await database.init_schema()
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+
+        # 先铺书源：books.source_id 有外键
+        sources = SqliteSourceRepository(database, get_paths().sources_dir)
+        from mograb.source import load_source_dict
+
+        spec = load_source_dict(
+            {
+                "spec_version": 1,
+                "id": "example",
+                "name": "Example",
+                "version": "1.0.0",
+                "capabilities": ["book"],
+                "permissions": {"network": ["example.com"]},
+                "book": {"request": {"url": "{{book.url}}"}, "fields": {"title": "h1"}},
+            }
+        )
+        await sources.save(spec)
+
+        await SqliteBookRepository(database).save(
+            Book(
+                id="book_s",
+                source_id="example",
+                source_book_id="1",
+                url="https://example.com/book/1",
+                title="三体",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await SqliteChapterRepository(database).save(
+            Chapter(
+                id="chap_s",
+                book_id="book_s",
+                title="第一章 科学边界",
+                url="https://example.com/1",
+                index=0,
+                content="汪淼接到一个差事，要去看看鲜荔枝。",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await database.dispose()
+
+    import asyncio
+
+    asyncio.run(go())

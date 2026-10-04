@@ -44,7 +44,7 @@ async def list_tasks(
     """列出任务，最新的在前。"""
     wanted = _parse_status(status)
 
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         tasks = await application.tasks.list_all(status=wanted)
 
     tasks = tasks[:limit]
@@ -101,7 +101,7 @@ async def show_task(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """查看任务详情。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         task = await application.tasks.get(task_id)
         if task is None:
             raise EntityNotFoundError(f"任务不存在: {task_id}", details={"task_id": task_id})
@@ -151,7 +151,7 @@ async def show_task(
 
 async def _control(action: str, task_id: str) -> dict:
     """通过 API 控制一个任务。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         settings = application.settings
 
     try:

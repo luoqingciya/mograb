@@ -32,6 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mograb import __version__
 from mograb.app import Application, build_task_manager, create_application
 from mograb.config import AppSettings, ensure_token, get_paths, load_settings
+from mograb.console import force_utf8_stdio
 from mograb.domain.task import Task
 from mograb.logging import get_logger
 
@@ -96,6 +97,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     """应用工厂。"""
+    # 打包后 uvicorn 的日志会走 stdout，同样受控制台代码页影响。
+    # 详见 mograb.console。
+    force_utf8_stdio()
+
     resolved = settings or load_settings()
 
     app = FastAPI(

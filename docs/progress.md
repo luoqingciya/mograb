@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc1`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc2`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -10,20 +10,25 @@
 核心链路已经跑通，而且**在真实站点上验证过**：`bqgnovels.com` 的书源取到完整
 目录 1453 章，端到端下载 7 章 / 76,725 字，三种格式导出正常。
 命令行、本地 API、桌面端三条路都通了；API 的所有业务端点都要求 Bearer 令牌；
+本地全文搜索（`mog find` / `GET /api/v1/search/local`）两条路都有；
 桌面端目前只做到最小闭环，书架、书源管理、设置还是占位页。
+
+> **rc1 的发布包是坏的，rc2 修掉了。** 两个产物都打不开数据库
+> （`ModuleNotFoundError: aiosqlite`），而三道关都没拦住 —— 因为都只验
+> 「构建成功」，没人真执行过产物。现在构建会自跑冒烟测试。
 
 ## 质量指标
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 650 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 655 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 6,880 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 源码行数 | 约 12,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 6,970 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
-| CI | 全绿（7 个 job） | `gh run list` |
+| CI | 全绿（8 个 job） | `gh run list` |
 
 ## 里程碑
 
@@ -158,12 +163,11 @@
 需要一整套分发协议（版本协商、签名校验），收益不抵复杂度。替代方案是
 `repository` 字段 + 用户自行安装，见 v0.3.0 一节。
 
-**`mog find` 只有 CLI，API 没有对应端点。** 本地全文搜索做成了
-`mog find <关键词>`，但 `/api/v1` 下没有对应接口 —— 而项目的原则是
-**API-First，API 才是正式产品接口**。所以桌面端目前做不了本地搜索。
-补一个端点即可（`ChapterRepository.search_content` 已经就绪），
-但端点该叫什么、返回结构怎么设计需要先想清楚（`/api/v1/search` 已被
-跨书源搜索占用）。
+**打包产物的冒烟测试曾经完全缺失。** rc1 发出去的 CLI 和桌面端都是坏的
+（SQLAlchemy 动态导入 `aiosqlite`，PyInstaller 没打进去），而构建、CI、发布
+三道关都只验「构建成功」，没人真执行过产物。现在 `scripts/build.py` 构建完
+自动跑一遍，CI 有独立的 `package-smoke` job，Release 工作流也会跑。
+这条已经从缺口变成防线。
 
 **Alembic 迁移目录没建。** 依赖声明了，但 `alembic/` 目录和首个迁移脚本还没有。
 现在 schema 是 `create_all` 建的，改表就得手写迁移。

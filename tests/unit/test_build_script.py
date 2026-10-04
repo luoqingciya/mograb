@@ -7,26 +7,16 @@ PyInstaller 建的目录名都叫 ``mog``，逐个搬文件时第一个就撞上
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BUILD_SCRIPT = REPO_ROOT / "scripts" / "build.py"
-
-
-def _load_build_module():
-    spec = importlib.util.spec_from_file_location("mograb_build_script", BUILD_SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture(scope="module")
-def build_module():
-    return _load_build_module()
+def build_module(load_script):
+    return load_script("build.py")
 
 
 def _make_nested(out_dir: Path, name: str, exe_name: str) -> Path:

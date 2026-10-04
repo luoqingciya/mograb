@@ -129,17 +129,17 @@ def set_verbose(value: bool) -> None:
 
 
 @asynccontextmanager
-async def open_app(*, ensure_paths: bool = True) -> AsyncIterator[Application]:
+async def open_app() -> AsyncIterator[Application]:
     """打开一个装配好的应用，用完自动收尾。
 
-    只读命令传 ``ensure_paths=False``，免得为了看一眼书源列表就在磁盘上
-    建出一堆目录。
+    数据目录结构一定会被建出来。这里曾经有个 ``ensure_paths`` 开关给只读
+    命令跳过创建 —— 但日志初始化无论如何都会建 ``logs/``，于是结果是
+    ``data/`` 建了一半，看起来像装坏了。要么全建要么不建。
 
     默认把日志压到 WARNING —— 命令行的正常输出是给用户看的，
     夹杂一堆 INFO 日志很难读。``mog -v`` 会放开。
     """
     async with create_application(
-        ensure_paths=ensure_paths,
         log_level="INFO" if _verbose else "WARNING",
     ) as app:
         yield app

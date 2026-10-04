@@ -50,13 +50,13 @@ def example_fixtures_dir(example_source_dir: Path) -> Path:
     return example_source_dir / "fixtures"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def now() -> datetime:
     """固定时间戳，避免测试依赖真实时钟。"""
     return datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def sample_book(now: datetime) -> Book:
     """样例书籍。"""
     return Book(
@@ -74,7 +74,7 @@ def sample_book(now: datetime) -> Book:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def sample_chapters(now: datetime, sample_book: Book) -> list[Chapter]:
     """样例章节列表。"""
     return [
@@ -135,7 +135,36 @@ class FixtureFetcher:
         """占位，让它能顶替 HttpClient 传给 create_application 之外的场景。"""
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def fixture_fetcher(example_fixtures_dir: Path) -> FixtureFetcher:
     """离线抓取器，替换掉真实 HTTP 客户端。"""
     return FixtureFetcher(example_fixtures_dir)
+
+
+@pytest.fixture(scope="module")
+def load_script():
+    """加载 ``scripts/`` 下的脚本，供单元测试使用。
+
+    脚本之间是**平级导入**（``from _console import ...``）—— 正常执行时
+    ``python scripts/xxx.py`` 会把 ``scripts/`` 放进 ``sys.path[0]``。
+    用 ``spec_from_file_location`` 加载时没有这一步，得自己补。
+
+    做成 fixture 而不是普通函数：``tests/`` 不是包，跨文件导入要走
+    ``sys.path`` 折腾，用 fixture 就没这些事。
+    """
+    import importlib.util
+    import sys
+
+    scripts_dir = str(REPO_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+
+    def _load(filename: str):
+        path = REPO_ROOT / "scripts" / filename
+        spec = importlib.util.spec_from_file_location(f"mograb_script_{path.stem}", path)
+        assert spec and spec.loader, f"加载不了 {path}"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    return _load

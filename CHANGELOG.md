@@ -5,6 +5,90 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [1.0.0rc2] - 2026-10-05
+
+**rc1 的发布包是坏的，这一版修掉。** 两个产物都打不开数据库：
+
+```
+ModuleNotFoundError: No module named 'aiosqlite'
+```
+
+CLI 一碰数据库就崩；桌面端内置的后端在 lifespan 启动阶段直接失败，
+整个桌面端都用不了。
+
+**根因**：SQLAlchemy 通过 `import_dbapi()` 按**字符串**导入驱动包，
+PyInstaller 的静态分析看不见。构建脚本的 `HIDDEN_IMPORTS` 里只列了
+dialect 适配器 `sqlalchemy.dialects.sqlite.aiosqlite`，漏了驱动包本身。
+
+**为什么没拦住**：产物能跑 `--version`、能出 `--help`，看起来是好的 ——
+只有真去读数据库才会暴露。而构建、CI、发布三道关都只验「构建成功」，
+没有任何一步真的执行过产物。
+
+### 修复
+
+**打包漏模块。** 加回 `aiosqlite`，并且**给构建加上了冒烟测试** ——
+这才是真正的修复。现在 `scripts/build.py` 构建完会自动执行产物：
+
+| 检查 | 覆盖什么 |
+|------|---------|
+| `--version` | 入口 + 版本元数据 |
+| `config path` | 配置解析 |
+| `source list` | **数据库读写**（当初漏 aiosqlite 的地方） |
+| `find <关键词>` | 查询路径（章节仓储） |
+| 数据目录 | 首次运行要建全 5 个子目录 |
+| 输出编码 | 必须是 UTF-8 字节 |
+
+后端另外起一次服务：探 `/health`，再带令牌打 `/api/v1/sources` ——
+**`/health` 不碰数据库，光看它通不出结论**，当初漏 aiosqlite 时它也是好的。
+
+CI 新增 `package-smoke` job，PR 阶段就拦。Release 工作流本来就会跑这个
+冒烟测试，所以发版前必然经过一次真执行。
+
+**打包后的产物输出 GBK 而不是 UTF-8。** PyInstaller 的 exe **无视**
+`PYTHONUTF8` / `PYTHONIOENCODING`（实测四种组合都无效），默认按控制台代码页
+输出，中文 Windows 上就是 GBK。后果是 `--json` 产出的不是合法 JSON
+（JSON 规范要求 UTF-8），管道给别的工具也是乱码。
+
+而开发态（`uv run`）是 UTF-8 —— **只有用户拿到的包是坏的**，本地怎么测都测不出来。
+
+修法：新增 `mograb.console.force_utf8_stdio()`，在 CLI 和 API 入口调用。
+只在**输出被重定向**时改编码 —— 直接连控制台时 CPython 走宽字符 API
+本来就正确，硬改反而会让 cp936 控制台乱码。
+
+**只读命令不会建出完整的数据目录。** `data/` 只建了 `logs/`，缺
+`cache` / `covers` / `exports` / `sources` —— 看起来像装坏了。
+
+原因是 `create_application` 有个 `ensure_paths` 开关，10 个只读命令都传了
+`False`。但日志初始化**无论如何都会建 `logs/`**，所以「不建目录」的意图
+根本没达成，结果是建了一半。
+
+现在**总是创建**，参数整个去掉。要么全建要么不建，全建的成本是几个空目录。
+
+### 新增
+
+**`GET /api/v1/search/local` —— 本地全文搜索的 API 端点。**
+`mog find` 之前只有 CLI，API 没有对应接口，而项目的原则是 API-First、
+API 才是正式产品接口。桌面端因此做不了本地搜索。现在补上了，
+仓储层的 `search_content` 本来就绪，只是没接线。
+
+和 `GET /search` 是两件事，所以分成两个端点而不是加个开关：
+前者去书源上搜书（找「哪本书」），后者只查本地库（找「哪一章」），
+一行网络请求都不发。
+
+### 工程
+
+**`scripts/` 纳入 pyright 检查。** 之前 `include` 只列了三个源码目录，
+发版脚本不在检查范围内 —— 而发版脚本恰恰是产出发布包的那段代码。
+补上后暴露 3 处 `sys.stdout.reconfigure` 的类型问题（运行时无碍），已修。
+
+**三个脚本里重复的 `_force_utf8_output` 收敛成 `scripts/_console.py` 一份。**
+脚本刻意保持独立（`version.py` 要在 `uv sync` 之前能跑），所以不和
+`mograb.console` 共用实现，但至少不再各写一遍。
+
+**测试夹具加 `load_script`。** 脚本之间是平级导入，用
+`spec_from_file_location` 加载时 `scripts/` 不在 `sys.path` 里，
+每个测试文件各写一遍 `sys.path.insert` 迟早会漏。
+
 ## [1.0.0rc1] - 2026-10-05
 
 **第二个预发布版本。** 主线是「把书源做成一个能长期维护的东西」——
@@ -440,5 +524,6 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
 
+[1.0.0rc2]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc2
 [1.0.0rc1]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc1
 [1.0.0rc0]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc0

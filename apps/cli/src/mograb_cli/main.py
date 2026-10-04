@@ -27,6 +27,7 @@ from __future__ import annotations
 import typer
 
 from mograb import __version__
+from mograb.console import force_utf8_stdio
 
 from .commands import (
     book,
@@ -43,6 +44,11 @@ from .commands import (
     update,
 )
 from .commands._common import console, set_verbose
+
+# 必须在任何输出之前执行。打包后的 exe 无视 PYTHONUTF8 / PYTHONIOENCODING，
+# 默认按控制台代码页（中文 Windows 上是 GBK）输出 —— 于是 --json 产出的
+# 不是合法 JSON。详见 mograb.console。
+force_utf8_stdio()
 
 app = typer.Typer(
     name="mog",

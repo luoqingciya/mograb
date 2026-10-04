@@ -236,6 +236,46 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
+  # 打包产物冒烟（PyInstaller）
+  #
+  # 为什么要有这个 job：rc1 发出去的 CLI 和桌面端**都是坏的** ——
+  # SQLAlchemy 按名字动态导入 aiosqlite，PyInstaller 静态分析看不见，
+  # 于是产物能跑 --version、能出 --help，一碰数据库就崩。
+  # 构建、CI、发布三道关全都没拦住。
+  #
+  # 只在 Linux 上打，够用：这类问题的根因是「模块没被打进去」，
+  # 与平台无关。Windows 的打包由 Release 工作流在发版前验证。
+  # ---------------------------------------------------------------------------
+  package-smoke:
+    name: Package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages --group build
+
+      # build.py 构建完会自动跑冒烟测试：真的执行产物，
+      # 验版本号、数据库读写、数据目录创建、以及输出编码。
+      # 后端还会起一次服务并打一个走数据库的端点。
+      #
+      # 版本号取仓库里的 VERSION —— build.py 会拿它和已安装包的元数据比对，
+      # 不一致直接拒绝（防止产物带错版本号），所以不能随便编一个。
+      - name: Build and smoke-test CLI
+        run: uv run python scripts/build.py cli --version "$(cat VERSION)"
+
+      - name: Build and smoke-test backend
+        run: uv run python scripts/build.py backend --version "$(cat VERSION)"
+
+  # ---------------------------------------------------------------------------
   # 桌面端（TypeScript 编译 + 类型检查 + SSE 解析器测试）
   #
   # 只装依赖不下载 Electron 二进制 —— 类型检查、tsc 编译和那 14 个测试

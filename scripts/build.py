@@ -17,24 +17,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from _console import force_utf8_stdio
 
-def _force_utf8_output() -> None:
-    """把标准输出切到 UTF-8。
-
-    Windows 控制台默认编码是 cp1252 或 cp936，直接 print 中文会抛
-    UnicodeEncodeError。本地和 CI 行为要一致，所以显式设置。
-    """
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
-
-
-_force_utf8_output()
+force_utf8_stdio()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = REPO_ROOT / "release-artifacts"
@@ -84,9 +75,17 @@ EXCLUDES = [
 
 # 动态导入、PyInstaller 静态分析发现不了的模块
 HIDDEN_IMPORTS = [
-    # SQLAlchemy 的 dialect 是按名字动态加载的
+    # SQLAlchemy 的 dialect 是按名字动态加载的。
+    # 下面这两条只解决 dialect **适配器**；真正的 DBAPI **驱动包**
+    # 还得单独列 —— 见下一行。
     "sqlalchemy.dialects.sqlite",
     "sqlalchemy.dialects.sqlite.aiosqlite",
+    # 驱动包本身。SQLAlchemy 通过 `import_dbapi()` 按字符串导入它，
+    # 静态分析看不见，漏掉的话产物一碰数据库就
+    # `ModuleNotFoundError: No module named 'aiosqlite'` ——
+    # 而 `--version`、`--help` 都正常，很容易以为包是好的。
+    # **这条漏过一次，rc1 的产物是坏的。**
+    "aiosqlite",
     # uvicorn 的运行期依赖
     "uvicorn.logging",
     "uvicorn.loops.auto",
@@ -239,6 +238,186 @@ def flatten_dist(out_dir: Path, name: str) -> None:
             shutil.rmtree(staging)
 
 
+def smoke_test(out_dir: Path, target: str, version: str) -> None:
+    """跑一遍产物，确认它真的能用。
+
+    **这一步是补上去的。** rc1 的 CLI 能跑 ``--version``、能出 ``--help``，
+    但一碰数据库就 ``ModuleNotFoundError: No module named 'aiosqlite'`` ——
+    SQLAlchemy 是按名字动态导入驱动包的，PyInstaller 静态分析看不见。
+    桌面端内置的后端**同样坏了**（lifespan 启动直接失败）。
+
+    构建、CI、发布三道关全都没拦住，两个包就这么发出去了。
+
+    教训：**「构建成功」不等于「产物能用」。** 只验文件存在、体积合理是不够的，
+    必须真的执行一遍。
+
+    Args:
+        out_dir: 拍平后的产物目录。
+        target: ``cli`` 或 ``backend``。
+        version: 期望的版本号。
+
+    Raises:
+        SystemExit: 任一项不通过。
+    """
+    if target == "cli":
+        _smoke_cli(out_dir, version)
+    else:
+        _smoke_backend(out_dir, version)
+
+
+def _smoke_cli(out_dir: Path, version: str) -> None:
+    exe = out_dir / ("mog.exe" if os.name == "nt" else "mog")
+    if not exe.is_file():
+        sys.exit(f"[smoke] 找不到可执行文件 {exe}")
+
+    # **数据目录在 exe 旁边，不是 cwd。** 冻结模式走的是便携模式
+    # （`runtime_dir()` 返回 `sys.executable` 的父目录），从哪儿调用都一样。
+    # 跑完必须删掉，否则会连 data/token 一起打进发布包。
+    data_dir = out_dir / "data"
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+
+    checks: list[tuple[list[str], list[str], str]] = [
+        # 入口 + 版本元数据（--copy-metadata 有没有生效）
+        (["--version"], [], version),
+        # 配置解析：不碰数据库，但会打印全部路径
+        (["config", "path"], ["data"], ""),
+        # **数据库读写**：这条是当初漏掉 aiosqlite 的地方
+        (["source", "list"], [], ""),
+        # 查询路径：本地全文搜索，走章节仓储
+        (["find", "不存在的关键词"], [], "没有匹配"),
+    ]
+
+    try:
+        for args, expect_any, expect_all in checks:
+            label = " ".join(args)
+            result = subprocess.run(
+                [str(exe), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+            output = (result.stdout or "") + (result.stderr or "")
+            if result.returncode != 0:
+                sys.exit(f"[smoke] `mog {label}` 退出码 {result.returncode}\n{output}")
+            if "Traceback" in output or "ModuleNotFoundError" in output:
+                sys.exit(f"[smoke] `mog {label}` 抛异常了\n{output}")
+            for token in expect_any:
+                if token not in output:
+                    sys.exit(f"[smoke] `mog {label}` 输出里没有 {token!r}\n{output}")
+            if expect_all and expect_all not in output:
+                sys.exit(f"[smoke] `mog {label}` 输出里没有 {expect_all!r}\n{output}")
+
+        # 首次运行必须把数据目录结构建全 —— 用户报告过这里不对
+        missing = [
+            name
+            for name in ("cache", "covers", "logs", "exports", "sources")
+            if not (data_dir / name).is_dir()
+        ]
+        if missing:
+            sys.exit(f"[smoke] 数据目录没建全，缺: {', '.join(missing)}")
+
+        # 输出必须是 UTF-8：打包后的 exe 会无视 PYTHONUTF8 / PYTHONIOENCODING，
+        # 默认按控制台代码页输出，于是 --json 产出的不是合法 JSON。
+        # 直接按字节比对 —— 解码成 str 再看就绕过了要验的东西。
+        probe = subprocess.run([str(exe), "find", "测试"], capture_output=True, timeout=120)
+        if "没有匹配".encode() not in probe.stdout:
+            sys.exit(
+                "[smoke] 输出不是 UTF-8 —— mograb.console 没生效。\n"
+                f"[smoke] 实际字节: {probe.stdout[:60]!r}"
+            )
+    finally:
+        # 产物里绝不能留运行期数据（里面有 API 令牌）
+        if data_dir.exists():
+            shutil.rmtree(data_dir)
+
+    print(f"[smoke] cli 产物通过 {len(checks)} 项检查，数据目录与编码正常")
+
+
+def _smoke_backend(out_dir: Path, version: str) -> None:
+    """起一次后端，确认它能真正提供服务。
+
+    桌面端内置的就是这个产物 —— 它坏了整个桌面端都用不了，
+    而 CLI 的检查完全覆盖不到它，所以必须单独起一遍。
+
+    ``/health`` 不碰数据库，**光看它通不出结论**：当初漏掉 aiosqlite 时
+    lifespan 就炸了，而 ``/health`` 本身是好的。所以还要带令牌打一个
+    走数据库的端点。
+    """
+    import json
+    import socket
+    import time
+    import urllib.error
+    import urllib.request
+
+    exe = out_dir / ("mograb-api.exe" if os.name == "nt" else "mograb-api")
+    if not exe.is_file():
+        sys.exit(f"[smoke] 找不到可执行文件 {exe}")
+
+    data_dir = out_dir / "data"
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+
+    # 挑个空闲端口，免得和本机正在跑的实例撞上
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    proc = subprocess.Popen(
+        [str(exe)],
+        env={**os.environ, "MOGRAB_SERVER__PORT": str(port)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    base = f"http://127.0.0.1:{port}"
+
+    try:
+        deadline = time.monotonic() + 60
+        body = ""
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                log = proc.stdout.read() if proc.stdout else "(无输出)"
+                sys.exit(f"[smoke] 后端自己退出了（码 {proc.returncode}）\n{log}")
+            try:
+                with urllib.request.urlopen(f"{base}/health", timeout=2) as resp:
+                    body = resp.read().decode("utf-8")
+                break
+            except (urllib.error.URLError, TimeoutError, OSError):
+                time.sleep(0.5)
+        else:
+            sys.exit("[smoke] 后端 60 秒内没起来")
+
+        payload = json.loads(body)
+        if payload.get("status") != "ok":
+            sys.exit(f"[smoke] /health 返回异常: {body}")
+        if payload.get("version") != version:
+            sys.exit(f"[smoke] /health 报的版本是 {payload.get('version')!r}，期望 {version!r}")
+
+        # 带令牌打一个**走数据库**的端点 —— 这才是当初漏 aiosqlite 的地方
+        token = (data_dir / "token").read_text(encoding="utf-8").strip()
+        request = urllib.request.Request(
+            f"{base}/api/v1/sources", headers={"Authorization": f"Bearer {token}"}
+        )
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            if json.loads(resp.read().decode("utf-8")) != []:
+                sys.exit("[smoke] 新装环境里 /api/v1/sources 应该是空列表")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        if data_dir.exists():
+            shutil.rmtree(data_dir)
+
+    print("[smoke] backend 产物通过：/health 正常，带令牌的数据库端点可用")
+
+
 def clean() -> None:
     """清理构建产物。"""
     for path in (ARTIFACTS, BUILD_DIR):
@@ -257,6 +436,7 @@ def main() -> None:
     for name in (*TARGETS, "all"):
         p = sub.add_parser(name, help=f"构建 {name}")
         p.add_argument("--version", default="0.0.0", help="版本号（写入产物元数据）")
+        p.add_argument("--no-smoke", action="store_true", help="跳过构建后的产物冒烟测试")
 
     sub.add_parser("clean", help="清理构建产物")
 
@@ -264,11 +444,13 @@ def main() -> None:
 
     if args.command == "clean":
         clean()
-    elif args.command == "all":
-        for target in TARGETS:
-            build(target, args.version)
-    else:
-        build(args.command, args.version)
+        return
+
+    targets = TARGETS if args.command == "all" else (args.command,)
+    for target in targets:
+        out_dir = build(target, args.version)
+        if not args.no_smoke:
+            smoke_test(out_dir, target, args.version)
 
 
 if __name__ == "__main__":

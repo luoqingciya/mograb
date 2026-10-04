@@ -26,7 +26,7 @@ async def stats(
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
 ) -> None:
     """查看缓存条目数与占用空间。"""
-    async with open_app(ensure_paths=False) as application:
+    async with open_app() as application:
         if purge:
             removed = await application.cache.purge_expired()
             if not json_output and removed:

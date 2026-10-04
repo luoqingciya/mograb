@@ -126,7 +126,8 @@ POST   /api/v1/sources/{id}/enable          启用
 POST   /api/v1/sources/{id}/disable         禁用
 POST   /api/v1/sources/{id}/doctor          健康检查
 
-GET    /api/v1/search                       跨书源搜索
+GET    /api/v1/search                       跨书源搜索（去站点上搜书）
+GET    /api/v1/search/local                 在已下载的正文里搜（纯本地）
 
 GET    /api/v1/books                        书架列表
 GET    /api/v1/books/{id}                   书籍详情
@@ -251,6 +252,45 @@ GET /api/v1/search?q=三体&source=example&limit=20
 > 设计裁决：规划书 §29 未说明 `GET /search` 是否跨源。
 > 本实现裁决为**默认跨源并发聚合**，可用 `source` 参数限定。
 > **单源失败不影响整体**——失败信息通过 `errors` 返回。
+
+#### 本地正文搜索
+
+```http
+GET /api/v1/search/local?q=荔枝&book_id=book_xxx&limit=50
+```
+
+```json
+{
+  "keyword": "荔枝",
+  "total": 7,
+  "items": [
+    {
+      "book_id": "book_01M43QSWXEJ7HWYARYGSBA4MNB",
+      "book_title": "长安的荔枝",
+      "chapter_id": "chap_01M43QSY0K0Z1F1QRC7H27X3E9",
+      "chapter_title": "第一章",
+      "chapter_index": 0,
+      "snippet": "…时刘署令从苇席下取出一轴文牒：“也不是甚么大事，内廷要采办些荔枝煎，此事非让老李你来勾当不可。”…"
+    }
+  ]
+}
+```
+
+**和 `GET /search` 是两件事，所以分成两个端点而不是加个开关**：
+
+| | `GET /search` | `GET /search/local` |
+|---|---|---|
+| 搜什么 | **书源**（站点上有什么书） | **本地库**（我下载过的正文） |
+| 答案 | 「哪本书」 | 「哪一章」 |
+| 网络 | 要发请求 | **一行都不发** |
+
+`q` 按**字面子串**匹配，不解析正则；关键词里的 `%` 和 `_` 会被转义。
+
+`snippet` 是命中位置附近的**片段**，不是整章正文 —— 一本几千章的书，
+搜一次就把几十兆正文读进内存是不可接受的。
+
+> 已知限制：底层是 `LIKE '%kw%'` 全表扫描，用不上索引。个人书库规模够用；
+> 库再大该上 FTS5 虚拟表，那要改 schema。
 
 ---
 
