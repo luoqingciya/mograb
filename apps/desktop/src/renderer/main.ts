@@ -6,7 +6,7 @@
 // 所以这一步失败就直接显示原因，不装作没事。
 
 import type { SearchItem } from '../shared/types.js';
-import { ApiError, createTask, listSources, setBaseUrl } from './api.js';
+import { ApiError, configure, createTask, listSources } from './api.js';
 import { el, replace, requireElement } from './dom.js';
 import { createSearchView } from './views/search.js';
 import { createTasksView } from './views/tasks.js';
@@ -88,6 +88,26 @@ function switchTo(pageId: string): void {
   }
 }
 
+/**
+ * 启动期间的占位内容。
+ *
+ * 视图一被创建就会发请求（任务页还会立刻订阅 SSE），而这时候后端地址还没拿到。
+ * 所以启动阶段先放这块占位，等配置就位再建真正的视图 —— 顺序错了的话，
+ * 相对路径会被解析成 `file:///...` 然后被 CSP 拦掉，报出来的错完全指不到原因。
+ */
+function showStartingPlaceholder(): void {
+  const content = requireElement<HTMLElement>('#content');
+  replace(
+    content,
+    el(
+      'section',
+      { class: 'view' },
+      el('h1', {}, '正在启动'),
+      el('p', { class: 'hint' }, '正在等本地服务就绪……'),
+    ),
+  );
+}
+
 function notify(message: string, kind: 'info' | 'error' = 'info'): void {
   const bar = requireElement<HTMLElement>('#notice');
   replace(bar, el('span', { class: kind === 'error' ? 'error' : 'muted' }, message));
@@ -152,18 +172,24 @@ async function checkSources(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   buildSidebar();
-  switchTo('search');
+  showStartingPlaceholder();
 
+  // 先把后端信息拿到手，再建视图 —— 视图创建时就会发请求，
+  // 没有地址的话请求会打到 file:// 上去。这条顺序是硬约束，别调换。
   try {
-    const baseUrl = await window.mograb.waitForBackend();
-    setBaseUrl(baseUrl);
+    const { baseUrl, token } = await window.mograb.waitForBackend();
+    configure(baseUrl, token);
     console.info('[main] 后端就绪:', baseUrl);
-    await checkSources();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    replace(requireElement<HTMLElement>('#content'), el('section', { class: 'view' }));
     notify(`本地服务没起来：${message}`, 'error');
     console.error('[main] 后端不可用', error);
+    return;
   }
+
+  switchTo('search');
+  await checkSources();
 }
 
 void bootstrap();

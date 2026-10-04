@@ -10,6 +10,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { app } from 'electron';
@@ -18,6 +19,7 @@ const HOST = '127.0.0.1';
 const PORT = 48721;
 const HEALTH_TIMEOUT_MS = 20_000;
 const HEALTH_POLL_MS = 300;
+const TOKEN_TIMEOUT_MS = 5_000;
 
 export const API_BASE_URL = `http://${HOST}:${PORT}/api/v1`;
 export const HEALTH_URL = `http://${HOST}:${PORT}/health`;
@@ -36,35 +38,78 @@ export async function isBackendReady(): Promise<boolean> {
   }
 }
 
+/**
+ * 后端的运行目录 —— 也就是它解析出的数据目录的父级。
+ *
+ * 后端的 ``data_dir()`` 规则是「冻结时跟可执行文件、开发时跟 cwd」，
+ * 而这里 spawn 时的 cwd 正好就是这两种情况下的运行目录。
+ */
+function backendRunDir(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'backend');
+  }
+  // 开发时从 dist/main/ 往上四层就是仓库根
+  return join(__dirname, '..', '..', '..', '..');
+}
+
 /** 解析要跑的命令。 */
 function resolveCommand(): { command: string; args: string[]; cwd: string } {
+  const cwd = backendRunDir();
+
   if (app.isPackaged) {
-    const exe = join(process.resourcesPath, 'backend', 'mograb-api.exe');
+    const exe = join(cwd, 'mograb-api.exe');
     if (!existsSync(exe)) {
       throw new Error(`找不到后端程序：${exe}`);
     }
-    return { command: exe, args: [], cwd: join(process.resourcesPath, 'backend') };
+    return { command: exe, args: [], cwd };
   }
 
-  // 开发时从 dist/main/ 往上四层就是仓库根
-  const repoRoot = join(__dirname, '..', '..', '..', '..');
   return {
     command: 'uv',
-    args: ['run', '--project', repoRoot, 'mograb-api'],
-    cwd: repoRoot,
+    args: ['run', '--project', cwd, 'mograb-api'],
+    cwd,
   };
 }
 
 /**
- * 确保后端在跑。
+ * 读后端的 API 令牌。
+ *
+ * 令牌由后端启动时生成在 ``<数据目录>/token``。这里不自己生成 ——
+ * 生成规则只有一份（在 mograb.config.token 里），两处各写一份迟早会走样。
+ *
+ * 之所以要轮询：端口打开和令牌写盘之间理论上可能有窗口，虽然 ``run()``
+ * 里已经把生成提到 bind 之前，多等几毫秒换一个确定的失败信息是划算的。
+ */
+async function readToken(): Promise<string> {
+  const path = join(backendRunDir(), 'data', 'token');
+  const deadline = Date.now() + TOKEN_TIMEOUT_MS;
+
+  for (;;) {
+    try {
+      const token = (await readFile(path, 'utf-8')).trim();
+      if (token !== '') {
+        return token;
+      }
+    } catch {
+      // 还没写出来，下面继续等
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`读不到 API 令牌：${path}。删掉它重启即可重新生成。`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, HEALTH_POLL_MS));
+  }
+}
+
+/**
+ * 确保后端在跑，返回它暴露的接口信息。
  *
  * 如果端口上已经有一个（比如开发时手动 `mog server start` 过），就直接用它 ——
  * 重复拉起只会因为端口占用而失败。
  */
-export async function startBackend(): Promise<void> {
+export async function startBackend(): Promise<BackendInfo> {
   if (await isBackendReady()) {
     console.log('[backend] 已有实例在运行，直接使用');
-    return;
+    return { baseUrl: API_BASE_URL, token: await readToken() };
   }
 
   const { command, args, cwd } = resolveCommand();
@@ -89,6 +134,12 @@ export async function startBackend(): Promise<void> {
   });
 
   await waitForHealth();
+  return { baseUrl: API_BASE_URL, token: await readToken() };
+}
+
+export interface BackendInfo {
+  baseUrl: string;
+  token: string;
 }
 
 /** 轮询健康检查直到就绪或超时。 */

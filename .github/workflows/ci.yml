@@ -214,10 +214,10 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # 桌面端（TypeScript 编译 + 类型检查）
+  # 桌面端（TypeScript 编译 + 类型检查 + SSE 解析器测试）
   #
-  # 只装依赖不下载 Electron 二进制 —— 类型检查和 tsc 编译都用不到它，
-  # 省一次上百兆的下载。
+  # 只装依赖不下载 Electron 二进制 —— 类型检查、tsc 编译和那 14 个测试
+  # 都用不到它，省一次上百兆的下载。
   # ---------------------------------------------------------------------------
   desktop:
     name: Desktop (tsc)
@@ -245,3 +245,8 @@ jobs:
       - name: Build
         working-directory: apps/desktop
         run: npm run build
+
+      # 测的是编译产物（dist/renderer/sse.js），所以必须排在 Build 之后
+      - name: Test
+        working-directory: apps/desktop
+        run: npm test

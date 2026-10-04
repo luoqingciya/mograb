@@ -18,7 +18,7 @@ push / PR → main, develop
 │ test          矩阵：{3.11,3.12} × {linux,windows} │
 │ source-lint   tests/fixtures 下的参考书源   │
 │ build         uv build --all-packages     │
-│ desktop       npm ci + tsc 类型检查与编译  │
+│ desktop       npm ci + tsc + SSE 解析器测试 │
 └───────────────────────────────────────────┘
 ```
 
@@ -28,7 +28,7 @@ push / PR → main, develop
 |------|------|
 | `uv sync --locked` | 强制 lock 与 pyproject 一致，防止本地能跑 CI 不能跑 |
 | 测试矩阵含 Windows | 桌面端只支持 Windows，路径和编码问题要早发现 |
-| desktop job 设 `ELECTRON_SKIP_BINARY_DOWNLOAD` | 类型检查和 tsc 编译用不到 Electron 二进制，省一次上百兆的下载 |
+| desktop job 设 `ELECTRON_SKIP_BINARY_DOWNLOAD` | 类型检查、tsc 编译和 SSE 解析器测试都用不到 Electron 二进制，省一次上百兆的下载 |
 | `version` 独立成 job | 版本号来源出问题会让发版直接失败，值得单独可见 |
 | 文档内链校验并入 `lint` | 纯标准库脚本，不需要单独装环境；归在 lint 语义下也说得通 |
 | `source-lint` 独立成 job | 书源问题与代码问题分开定位 |

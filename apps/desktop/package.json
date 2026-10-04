@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "npm run build && electron .",
-    "pack": "npm run build && electron-builder --win --publish never"
+    "pack": "npm run build && electron-builder --win --publish never",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

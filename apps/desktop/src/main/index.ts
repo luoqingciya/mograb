@@ -17,10 +17,10 @@ import { join } from 'node:path';
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 
-import { API_BASE_URL, isBackendReady, startBackend, stopBackend } from './backend';
+import { type BackendInfo, isBackendReady, startBackend, stopBackend } from './backend';
 
 /** 后端起好之前先挂着，渲染进程 await 它。 */
-let backendReady: Promise<void> | null = null;
+let backendReady: Promise<BackendInfo> | null = null;
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -43,6 +43,15 @@ function createWindow(): BrowserWindow {
   window.once('ready-to-show', () => window.show());
   window.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
 
+  // 开发时把渲染进程的 console 转发到终端。
+  // 不转发的话，前端请求失败（CORS、401、解析出错）在终端里完全看不见 ——
+  // 后端日志照样记 200，看起来一切正常。
+  if (!app.isPackaged) {
+    window.webContents.on('console-message', (_event, level, message) => {
+      console.log(`[renderer:${level}] ${message}`);
+    });
+  }
+
   // 外部链接交给系统浏览器，不在应用里开新窗口
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -60,12 +69,12 @@ function createWindow(): BrowserWindow {
 
 function registerIpc(): void {
   // 渲染进程启动时 await 这个。后端失败时它会 reject，前端据此显示错误。
+  // 返回里带令牌 —— 渲染进程拿不到文件系统，只能由主进程读好递过去。
   ipcMain.handle('backend:wait', async () => {
     if (backendReady === null) {
       throw new Error('后端尚未启动');
     }
-    await backendReady;
-    return { baseUrl: API_BASE_URL };
+    return await backendReady;
   });
 
   ipcMain.handle('backend:ping', () => isBackendReady());

@@ -29,17 +29,19 @@ apps/desktop/
 ├── src/
 │   ├── main/            主进程（Node 环境）
 │   │   ├── index.ts     窗口与应用生命周期
-│   │   ├── backend.ts   后端 sidecar 的启动与健康检查
+│   │   ├── backend.ts   后端 sidecar 的启动、健康检查、读令牌
 │   │   └── preload.ts   contextBridge（沙箱下必须是 CommonJS）
 │   ├── renderer/        渲染进程（浏览器环境）
 │   │   ├── index.html
 │   │   ├── styles.css
-│   │   ├── main.ts      入口：等后端就绪、搭界面、切页
+│   │   ├── main.ts      入口：等后端就绪、配置客户端、搭界面、切页
 │   │   ├── api.ts       本地 API 客户端
+│   │   ├── sse.ts       SSE 读取端（fetch + 手写解析 + 重连）
 │   │   ├── dom.ts       极简 DOM 辅助
 │   │   └── views/       各页面
 │   └── shared/
 │       └── types.ts     与 API 契约对应的类型
+├── test/sse.test.mjs    SSE 解析器的测试（node:test）
 ├── scripts/copy-static.mjs
 ├── tsconfig.base.json
 ├── tsconfig.main.json      主进程 → CommonJS
@@ -68,11 +70,37 @@ npm install
 npm start          # 编译 + 启动；后端会自动拉起
 npm run typecheck  # 只做类型检查
 npm run build      # 只编译
+npm test           # SSE 解析器的单元测试
 ```
 
 后端由主进程自动拉起：打包后找 `resources/backend/mograb-api.exe`，
 开发时用仓库里的 uv 环境跑 `mograb-api`。如果端口上已经有实例在跑（比如你
 手动 `mog server start` 过），会直接复用它，不会重复启动。
+
+### 两个容易踩的点
+
+**环境里如果有 `ELECTRON_RUN_AS_NODE=1`，Electron 会被当成 Node 跑**，
+启动时报 `Cannot read properties of undefined (reading 'whenReady')`。
+清掉这个变量再启动：
+
+```bash
+env -u ELECTRON_RUN_AS_NODE npx electron .
+```
+
+**视图只在拿到后端地址之后创建。** 视图一被创建就会发请求（任务页还会立刻
+订阅 SSE），而配置是异步到位的。顺序错了的话，相对路径会被解析成
+`file:///D:/tasks/events`，然后被 CSP 拦下 —— 报出来的是「违反内容安全策略」，
+完全指不到真正的原因。`main.ts` 里的顺序是有意的，别调换。
+
+## 鉴权
+
+API 的每个业务端点都要求 `Authorization: Bearer <token>`。
+
+令牌由后端生成在 `<数据目录>/token`，主进程在健康检查通过后读它，
+经 preload 递给渲染进程（渲染进程开了 sandbox，拿不到文件系统）。
+
+**SSE 用 `fetch` 读流，不用 `EventSource`** —— 后者不能设置请求头，
+而令牌不能走查询参数（会出现在服务端访问日志里）。见 `src/renderer/sse.ts`。
 
 ## 当前进度
 
@@ -93,7 +121,7 @@ npm run build      # 只编译
 - `sandbox: true`
 - CSP：`script-src 'self'`，`connect-src` 只放行本地 API
 - 外部链接交给系统浏览器，不在应用内开新窗口
-- 渲染进程只能通过 preload 暴露的 `window.mograb` 拿后端地址，
+- 渲染进程只能通过 preload 暴露的 `window.mograb` 拿后端地址和令牌，
   业务请求直接 `fetch` 本地 API
 
 ## 许可证
