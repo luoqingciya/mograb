@@ -8,19 +8,20 @@
 ## 一句话
 
 核心链路已经跑通：**能完整下载一本小说**（搜索 → 登记 → 目录 → 增量比对 →
-抓正文 → 清洗校验 → 落库 → 导出）。命令行和本地 API 都能用，桌面端还没开始。
+抓正文 → 清洗校验 → 落库 → 导出）。命令行、本地 API、桌面端三条路都通了；
+桌面端目前只做到最小闭环，书架、书源管理、设置还是占位页。
 
 ## 质量指标
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 439 | `uv run pytest --collect-only -q \| tail -1` |
-| 覆盖率 | 83% | `uv run pytest --cov --cov-report=term` |
+| 测试用例 | 482 | `uv run pytest --collect-only -q \| tail -1` |
+| 覆盖率 | 84% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 11,300 | — |
-| 测试行数 | 约 4,600 | — |
-| 未实现桩 | 0 | `grep -rn NotImplementedError packages apps` |
-| CI | 九项全绿 | `gh run list` |
+| 源码行数 | 约 11,400（另有桌面端 TS 约 1,000 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 4,850 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
+| CI | 全绿（7 个 job） | `gh run list` |
 
 ## 里程碑
 
@@ -33,7 +34,7 @@
 | v0.3.0 | Source Ecosystem | **部分** | Source Registry、`source test`、版本回滚 |
 | v0.4.0 | API | **达成**（除认证） | API 认证 |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
-| v0.6.0 | Desktop | **未开始** | 全部 |
+| v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
 | v0.7.0 | EPUB / Polish | **部分** | 封面、元数据模板、性能优化 |
 | v1.0.0 | Stable | 未到 | — |
 
@@ -98,7 +99,7 @@
 |------|------|------|
 | `apps/cli` | 完成 | 11 组命令 |
 | `apps/api` | 完成 | 22 个端点 + SSE，缺认证 |
-| `apps/desktop` | 骨架 | 主进程 / preload / 静态页，UI 未接 |
+| `apps/desktop` | 最小闭环 | 搜索 → 下载 → 任务进度可用；书架 / 书源 / 设置是占位 |
 
 ## 已知缺口
 
@@ -111,7 +112,9 @@
 做法已经定了：随机 token 写进 `config.toml`，CLI 和 Desktop 读它。
 **v0.4.0 正式对外之前必须补上。**
 
-**桌面端没开始。** 这是 v0.6.0 的全部内容，也是「最终产品形态」里唯一空着的一角。
+**桌面端只做了最小闭环。** 搜索、下载、任务进度能用，书架 / 书源管理 / 设置
+还是占位页。先跑通闭环是为了验证「Electron + 本地 API + SSE」这套架构真的成立 ——
+现在验证过了，剩下的是照着补页面。
 
 **所有测试都是离线的。** fixture 测试用的是 HTML 快照，没有在真实站点上跑过
 完整下载。接口之间对得上（端到端测试证明了这一点），但真实站点的
@@ -144,8 +147,7 @@
 1. **补 API 认证** —— 缺口明确、改动小，而且卡着「能不能安全对外」这件事。
    改完就不用再回头动 API 层。
 2. **在真实站点上验证一次完整下载** —— 所有测试都离线，这是最大的未知。
-3. **桌面端** —— 依赖已经齐了（API 全通），`package-lock.json` 一提交
-   发版工作流就自动接管打包。
+3. **桌面端补全页面** —— 书架、书源管理、设置。架构已验证，照着加就行。
 4. **Source Registry** —— 让书源能分发和更新。
 
 ## 相关文档

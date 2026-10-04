@@ -1,30 +1,49 @@
 {
   "name": "mograb-desktop",
-  "version": "0.1.0",
-  "description": "MoGrab Desktop (Electron) — Windows only",
+  "version": "0.0.0",
+  "description": "MoGrab Desktop (Electron) — Windows only. 版本号打包时注入，见 scripts/copy-static.mjs。",
   "private": true,
   "license": "GPL-3.0-only",
-  "main": "src/main/index.js",
+  "main": "dist/main/index.js",
   "scripts": {
-    "start": "electron .",
-    "build": "echo \"TODO: electron-builder 打包\" && exit 0",
-    "lint": "echo \"TODO: eslint\" && exit 0"
+    "prebuild": "node scripts/copy-static.mjs",
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --win --publish never"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "@types/node": "^22.10.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
   },
   "build": {
     "appId": "org.mograb.desktop",
     "productName": "MoGrab",
-    "win": {
-      "target": ["zip", "nsis"],
-      "artifactName": "MoGrab-${version}-win-x64.${ext}"
+    "directories": {
+      "output": "release"
     },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
     "extraResources": [
       {
-        "from": "../../../release-artifacts/backend",
+        "from": "../../release-artifacts/backend",
         "to": "backend"
       }
-    ]
+    ],
+    "win": {
+      "target": [
+        "zip",
+        "nsis"
+      ],
+      "artifactName": "MoGrab-${version}-win-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

@@ -135,29 +135,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check for Electron lockfile
-        id: lockfile
-        shell: bash
-        run: |
-          if [ -f apps/desktop/package-lock.json ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::apps/desktop 没有 package-lock.json，跳过桌面端构建"
-          fi
-
       - name: Install uv
-        if: steps.lockfile.outputs.ready == 'true'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       - name: Set up Python
-        if: steps.lockfile.outputs.ready == 'true'
         run: uv python install 3.12
 
       - name: Set up Node.js
-        if: steps.lockfile.outputs.ready == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -165,26 +151,27 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Install Python dependencies
-        if: steps.lockfile.outputs.ready == 'true'
         run: uv sync --locked --all-packages --group build
 
-      - name: Build Desktop backend (sidecar)
-        if: steps.lockfile.outputs.ready == 'true'
+      - name: Build backend sidecar
         shell: bash
         run: uv run python scripts/build.py backend --version "${RAW_VERSION#v}"
 
       - name: Install Electron dependencies
-        if: steps.lockfile.outputs.ready == 'true'
         working-directory: apps/desktop
         run: npm ci
 
+      # 版本号从 tag 传进来，不去改 package.json —— 改了会让 lock 对不上，
+      # npm ci 就有风险。界面要显示版本就读后端 /health。
       - name: Build Electron app (ZIP + NSIS)
-        if: steps.lockfile.outputs.ready == 'true'
         working-directory: apps/desktop
-        run: npx electron-builder --win --publish never
+        shell: bash
+        run: |
+          version="${RAW_VERSION#v}"
+          npm run build
+          npx electron-builder --win --publish never --config.extraMetadata.version="$version"
 
       - name: Upload artifacts
-        if: steps.lockfile.outputs.ready == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: desktop-windows

@@ -50,7 +50,6 @@
   书源仓储把定义放磁盘、把本机记账放数据库，索引能从磁盘重建；
   HTTP 缓存实现三层失效（TTL / 显式 / 容量），容量满了按最久未访问淘汰。
   批量写入走单事务，避免「下载成功但库里只有一半」。
-  批量写入走单事务，避免"下载成功但库里只有一半"。
 - `content` —— 清洗分 DOM 级和文本级，内置了常见水印行过滤。
   校验阈值收在 `ContentPolicy` 里，不硬编码。
 - `export` —— TXT / Markdown / EPUB。EPUB 是自研的（`ebooklib` 是 AGPL，
@@ -78,8 +77,12 @@
   桌面端任务页要用）；CORS 收紧到只允许本机来源。任务走 worker 池 + 队列，
   支持暂停/继续/取消。
 
-- `apps/desktop` —— Electron 骨架。开了 `contextIsolation` 和 `sandbox`，
-  关了 `nodeIntegration`，CSP 只放行本地 API。
+- `apps/desktop` —— Electron + TypeScript。最小闭环已跑通：
+  搜索 → 点下载 → 看任务进度（SSE 实时推）。书架 / 书源管理 / 设置还是占位页。
+
+  构建用 tsc 不引打包器 —— 渲染层走原生 ES modules，编译完 Electron 直接加载。
+  主进程 CommonJS、渲染层 ESM，所以有两份 tsconfig。开了 `contextIsolation`、
+  `sandbox`，关了 `nodeIntegration`，CSP 只放行本地 API。
 
 ### 装配
 
@@ -103,10 +106,27 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 - uv workspace monorepo。版本号统一到根 `VERSION` 文件。
 - 数据目录改成便携模式：全部在运行目录的 `data/` 下，不写系统目录。
 - Ruff + Pyright + pre-commit 配置。
-- GitHub Actions：CI（lint / 类型检查 / 测试矩阵 / 书源校验 / 构建），
+- GitHub Actions：CI（lint / 文档内链 / 类型检查 / 测试矩阵 / 书源校验 / 构建），
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
-- `scripts/version.py`、`scripts/build.py`、`scripts/release.py`。
-- 439 个测试，覆盖率 83%，门槛设在 70%。
+- `scripts/version.py`、`scripts/build.py`、`scripts/release.py`、
+  `scripts/check_docs.py`。
+- 482 个测试，覆盖率 84%，门槛设在 70%。
+
+### 修复
+
+**建任务时校验引用的实体。** `tasks.book_id` 上有外键，但 `POST /api/v1/tasks`
+传一个不存在的 `book_id` 时，插入抛的是裸的 `IntegrityError` —— 到客户端
+就是 500，而 `/api/v1/exports` 同样的输入给的是 404。现在校验收到
+`Application.create_task()` 里，CLI 和 API 共用一份判据：
+
+| 情况 | 之前 | 现在 |
+|------|------|------|
+| 书不存在 | 500 | 404 `STORAGE_NOT_FOUND` |
+| 书源不存在 | 500 | 404 `SOURCE_NOT_FOUND` |
+| 下载任务没说下哪本 | 500 | 400 `TASK_PARAMETER_ERROR` |
+
+新增 `TaskParameterError`，和 `InvalidTaskTransitionError` 分开 ——
+后者是「和资源当前状态冲突」（409），前者是「请求本身没说清楚」（400）。
 
 ### 相对原规划书的改动
 
@@ -132,6 +152,8 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 完整清单和优先级在 [docs/progress.md](docs/progress.md)。最要紧的一条：
 
 - API 没有认证，只有 CORS。**v0.4.0 之前必须补上随机 token**
+
+桌面端还剩书架、书源管理、设置三个页面；架构已验证，照着补即可。
 
 ## 版本规划
 

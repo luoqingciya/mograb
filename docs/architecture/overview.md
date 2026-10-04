@@ -261,7 +261,7 @@ RetryPolicy.should_retry(error, attempt)?
 | 存储 | SQLAlchemy 2.0 async + aiosqlite + Alembic | |
 | 日志 | structlog | 结构化，带脱敏 |
 | CLI | Typer + Rich | |
-| 桌面端 | Electron + TypeScript | |
+| 桌面端 | Electron + TypeScript（tsc，不引打包器） | 见 apps/desktop/README.md |
 | 测试 | pytest + pytest-asyncio + pytest-cov | |
 | 质量 | Ruff + Pyright + pre-commit | |
 
