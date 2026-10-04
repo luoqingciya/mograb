@@ -37,6 +37,49 @@ class BookStatus(StrEnum):
     ONGOING = "ongoing"  # 连载中
     COMPLETED = "completed"  # 已完结
 
+    @classmethod
+    def parse(cls, value: str | None) -> BookStatus:
+        """把书源提取到的状态文本映射为枚举值。
+
+        接受规范值（``ongoing`` / ``completed`` / ``unknown``）与常见同义写法
+        （``连载`` / ``连载中`` / ``已完结`` / ``完本`` / ``全本`` / ``finished`` …），
+        大小写与首尾空白不敏感。**认不出来一律返回 ``UNKNOWN``** ——
+        状态是锦上添花的元数据，不该因为它让整本书登记失败。
+
+        **刻意不接受 ``"0"`` / ``"1"``。** 这两个值的含义每个站点都不一样
+        （本站 ``"1"`` 是已完结，换个站可能正好相反），引擎没有依据去猜。
+        书源该用**锚定整值**的 ``regex_replace``（``^1$`` → ``completed``）
+        自己转成规范值 —— 这样转换规则写在书源里，跟着书源一起被审阅和版本化。
+        """
+        if value is None:
+            return cls.UNKNOWN
+        key = value.strip().casefold()
+        if not key:
+            return cls.UNKNOWN
+        return _STATUS_ALIASES.get(key, cls.UNKNOWN)
+
+
+# 状态同义写法。只做**整值精确匹配**，不做子串匹配 ——
+# 「非连载」这种带否定的值被子串匹配会得到完全相反的结论。
+_STATUS_ALIASES: dict[str, BookStatus] = {
+    "unknown": BookStatus.UNKNOWN,
+    "未知": BookStatus.UNKNOWN,
+    "ongoing": BookStatus.ONGOING,
+    "serializing": BookStatus.ONGOING,
+    "连载": BookStatus.ONGOING,
+    "连载中": BookStatus.ONGOING,
+    "連載": BookStatus.ONGOING,
+    "連載中": BookStatus.ONGOING,
+    "completed": BookStatus.COMPLETED,
+    "complete": BookStatus.COMPLETED,
+    "finished": BookStatus.COMPLETED,
+    "完结": BookStatus.COMPLETED,
+    "已完结": BookStatus.COMPLETED,
+    "完本": BookStatus.COMPLETED,
+    "已完本": BookStatus.COMPLETED,
+    "全本": BookStatus.COMPLETED,
+}
+
 
 class TaskType(StrEnum):
     """任务类型。"""

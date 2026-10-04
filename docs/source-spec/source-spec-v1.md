@@ -271,6 +271,44 @@ result:
 相对地址会按 RFC 3986 相对当前页解析，所以 `?page=2`、`/list_2.html`
 这类写法都能用。
 
+### 5.5 约定字段名
+
+`fields` 的键名不是随便起的 —— 下面这些有特殊含义，会被引擎映射到领域对象上；
+**其余键一律进 `extra`**（最终落到 `Book.metadata` / `SearchResult.extra`）。
+
+| 能力 | 约定字段 | 映射到 |
+|------|---------|--------|
+| `book` | `id` | `Book.source_book_id`（缺省时用规范化后的 URL 兜底） |
+| `book` | `title` | `Book.title`（**必需**，缺失即致命错误） |
+| `book` | `author` / `intro` / `cover` | 同名字段 |
+| `book` | `latest_chapter` | `Book.latest_chapter` |
+| `book` | `status` | `Book.status`，见下 |
+| `search` | `title` / `url` | 结果条目的必需字段 |
+| `search` | `author` / `cover` / `intro` | 同名字段 |
+
+#### `status` 的取值
+
+`status` 会被 :meth:`BookStatus.parse` 映射成 `ongoing` / `completed` / `unknown`。
+它接受规范值和常见同义写法（`连载中` / `已完结` / `完本` / `finished` …），
+**认不出来一律降级为 `unknown`** —— 状态是锦上添花的元数据，
+不该因为它让整本书登记失败。
+
+> **`"0"` / `"1"` 不被接受。** 这两个值的含义每个站点都不一样，
+> 引擎没有依据去猜。书源该用**锚定整值**的 `regex_replace` 自己转：
+
+```yaml
+book:
+  fields:
+    status: 'regex:state:"(\d+)"'
+  transform:
+    # `^1$` 只匹配「整个值恰好是 1」的字段，也就是只有 status。
+    # 这是在用能力级 transform 模拟字段级 —— 见 §6.4。
+    - regex_replace: {pattern: "^1$", replacement: "completed"}
+    - regex_replace: {pattern: "^0$", replacement: "ongoing"}
+```
+
+把转换规则写在书源里而不是引擎里是有意的：它跟着书源一起被审阅和版本化。
+
 ---
 
 ## 6. 变换（Transformer）

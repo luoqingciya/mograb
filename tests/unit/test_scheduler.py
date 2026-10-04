@@ -15,7 +15,7 @@ import pytest
 from mograb.content.pipeline import ContentPipeline
 from mograb.domain.book import Book
 from mograb.domain.chapter import Chapter
-from mograb.domain.enums import HealthStatus
+from mograb.domain.enums import BookStatus, HealthStatus
 from mograb.domain.source import InstalledSource, SourceSpec
 from mograb.errors import (
     ContentValidationError,
@@ -82,10 +82,14 @@ class FakeEngine:
         drafts: list[ChapterDraft] | None = None,
         contents: dict[str, str] | None = None,
         fail_urls: set[str] | None = None,
+        book_status: BookStatus = BookStatus.UNKNOWN,
+        book_extra: dict[str, str | None] | None = None,
     ) -> None:
         self.drafts = drafts if drafts is not None else make_drafts(3)
         self.contents = contents or {}
         self.fail_urls = fail_urls or set()
+        self.book_status = book_status
+        self.book_extra = book_extra or {}
         self.book_calls = 0
         self.chapter_calls = 0
         self.content_calls: list[str] = []
@@ -98,6 +102,8 @@ class FakeEngine:
             url=book_url,
             title="测试书",
             author="作者",
+            status=self.book_status,
+            extra=dict(self.book_extra),
         )
 
     async def fetch_chapters(self, source: SourceSpec, book_url: str) -> list[ChapterDraft]:
@@ -261,6 +267,67 @@ class TestEnsureBook:
         scheduler, _, _, _, _ = make_scheduler(sources=FakeSourceRepository())
         with pytest.raises(SourceNotFoundError):
             await scheduler.ensure_book("demo", BOOK_URL)
+
+
+class TestBookDraftReachesDomain:
+    """书源提取到的状态和自定义字段必须真的落到 ``Book`` 上。
+
+    这三条链路以前都是断的：``BookStatus`` 枚举的文档写着「由书源尽力解析」，
+    但 ``BookDraft`` 里没有 ``status``；``draft.extra`` 引擎收集了却全仓库
+    没人消费。结果是书源写什么都白写 —— 声明了没接线。
+    """
+
+    async def test_status_落到新书(self) -> None:
+        scheduler, _, _, _, _ = make_scheduler(
+            books=FakeBookRepository(),
+            engine=FakeEngine(book_status=BookStatus.COMPLETED),
+        )
+
+        book = await scheduler.ensure_book("demo", BOOK_URL)
+
+        assert book.status is BookStatus.COMPLETED
+
+    async def test_status_刷新已有书(self) -> None:
+        """上次是连载中，这次书源说完结了，要更新过来。"""
+        existing = make_book(status=BookStatus.ONGOING)
+        scheduler, _, _, _, _ = make_scheduler(
+            books=FakeBookRepository({"book_1": existing}),
+            engine=FakeEngine(book_status=BookStatus.COMPLETED),
+        )
+
+        book = await scheduler.ensure_book("demo", BOOK_URL)
+
+        assert book.status is BookStatus.COMPLETED
+
+    async def test_未提供时保持_UNKNOWN(self) -> None:
+        scheduler, _, _, _, _ = make_scheduler(books=FakeBookRepository())
+
+        book = await scheduler.ensure_book("demo", BOOK_URL)
+
+        assert book.status is BookStatus.UNKNOWN
+
+    async def test_extra_落到_metadata(self) -> None:
+        scheduler, _, _, _, _ = make_scheduler(
+            books=FakeBookRepository(),
+            engine=FakeEngine(book_extra={"category": "玄幻奇幻"}),
+        )
+
+        book = await scheduler.ensure_book("demo", BOOK_URL)
+
+        assert book.metadata == {"category": "玄幻奇幻"}
+
+    async def test_刷新时保留已有_metadata_键(self) -> None:
+        """书源没提供的键不该被刷新抹掉。"""
+        existing = make_book(metadata={"用户备注": "想读", "category": "旧分类"})
+        scheduler, _, _, _, _ = make_scheduler(
+            books=FakeBookRepository({"book_1": existing}),
+            engine=FakeEngine(book_extra={"category": "玄幻奇幻"}),
+        )
+
+        book = await scheduler.ensure_book("demo", BOOK_URL)
+
+        assert book.metadata["用户备注"] == "想读"  # 保留
+        assert book.metadata["category"] == "玄幻奇幻"  # 书源覆盖
 
 
 # ---------------------------------------------------------------------------

@@ -182,6 +182,30 @@ class TestExportTask:
         assert path.is_file()
         assert path.parent == app.paths.root / "exports"
 
+    @pytest.mark.parametrize(
+        ("fmt", "suffix"),
+        [("txt", ".txt"), ("markdown", ".markdown"), ("epub", ".epub")],
+    )
+    async def test_文件扩展名跟着实际导出格式(
+        self, app: Application, downloaded: str, fmt: str, suffix: str
+    ) -> None:
+        """**扩展名必须跟实际格式一致。**
+
+        踩过一次：``resolve_export_target`` 拿配置里的默认格式（epub）拼扩展名，
+        而不是本次实际用的格式。于是 ``--format txt`` 产出一个内容是纯文本、
+        名字却叫 ``.epub`` 的文件 —— 内容没错，但名字骗人，
+        而且不报错。只有「指定格式但不指定路径」这个组合会触发。
+        """
+        task = await app.run_task(TaskType.EXPORT_BOOK, book_id=downloaded, params={"format": fmt})
+
+        assert task.status is TaskStatus.SUCCESS, task.error_message
+        path = Path(str(task.params["path"]))
+        assert path.suffix == suffix, f"导出 {fmt} 却得到 {path.name}"
+
+        # 内容也要对得上：epub 是 ZIP，其余是纯文本
+        raw = path.read_bytes()
+        assert raw.startswith(b"PK") if fmt == "epub" else not raw.startswith(b"PK")
+
     async def test_export_missing_book_is_rejected(self, app: Application) -> None:
         with pytest.raises(EntityNotFoundError):
             await app.run_task(TaskType.EXPORT_BOOK, book_id="book_nope")

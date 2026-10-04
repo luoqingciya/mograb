@@ -16,11 +16,11 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 581 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 606 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 6,000 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 6,200 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（7 个 job） | `gh run list` |
@@ -132,19 +132,8 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 **没有字段级 transform。** `transform` 作用于能力下的所有字段，
 所以 `url_join` 只能用「像不像 URL」来条件化（规范 §6.4 的折中）。
-原始规划书说 v1.1 会加字段级，目前还没做。
-
-**`Book.status` 永远是 UNKNOWN。** `BookStatus` 枚举的文档写着
-「由书源尽力解析，未知时为 UNKNOWN」，但**从书源到 `Book.status` 的链路是断的** ——
-`BookDraft` 里根本没有 `status` 字段。全仓库它只出现在三处：枚举定义、
-`Book` 的默认值、从数据库读回时的转换，**没有任何地方把它设成
-ONGOING 或 COMPLETED**。
-
-这是第三个「声明了没接线」（前两个是 `network.headers` / `network.retry`，
-已修）。修它除了补 `BookDraft.status`，还要决定**书源怎么表达状态** ——
-本站的原始值是 `"1"`/`"0"`，而这两个值的含义每个站点都不一样，引擎不能硬编码。
-在 v1 里只能用「锚定整值的正则」绕过（`^1$` 只命中 status 字段），
-但那是在模拟字段级 transform。等确认要做再动。
+原始规划书说 v1.1 会加字段级，目前还没做。状态字段的 `"1"`→`completed`
+映射也因此只能用「锚定整值的正则」绕（见规范 §5.5）。
 
 ### 低
 
@@ -173,6 +162,11 @@ ONGOING 或 COMPLETED**。
 
 ## 已完成的重要节点
 
+- **书源的状态与自定义字段接通领域模型**（2026-10-04）。`BookStatus` 枚举的
+  文档一直写着「由书源尽力解析」，但 `BookDraft` 里没有 `status` 字段、
+  `draft.extra` 也全仓库无人消费 —— 两条链路都是断的，书源写什么都白写。
+  现在 `book.fields.status` 会映射成 `Book.status`，规范外的字段进
+  `Book.metadata`。见规范 §5.5。
 - **首个真实站点书源跑通**（2026-10-04）。`bqgnovels.com` 完整目录 1453 章、
   正文清洗干净。过程中暴露并修掉了四个引擎缺口（分页、`network` 死配置、
   `<br>` 分段、U+00A0 清洗）和一个 httpx `params={}` 清空查询串的真 bug。

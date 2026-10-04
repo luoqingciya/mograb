@@ -36,6 +36,38 @@ result:
 
 ### 修复
 
+**`--format` 指定的格式不影响导出文件的扩展名。** `resolve_export_target`
+拿的是**配置里的默认格式**（`epub`）来拼扩展名，而不是本次实际用的格式。
+于是 `mog download -f txt` 会产出一个内容是纯文本、名字却叫 `.epub` 的文件 ——
+内容没错，名字骗人，而且不报错。
+
+只有「指定了格式但没指定路径」这个组合会触发，所以之前的测试全都没覆盖到：
+指定路径的那条测试传的是 `.txt` 路径，不指定路径的那条用的是默认格式。
+现在扩展名跟着**实际导出器**走，并补了三种格式的参数化测试
+（连内容一起验：epub 必须是 ZIP）。
+
+**书源的状态和自定义字段到不了领域模型。** 两条链路都是断的：
+
+- `BookStatus` 枚举的文档写着「由书源尽力解析，未知时为 UNKNOWN」，
+  但 **`BookDraft` 里根本没有 `status` 字段** —— 全仓库它只出现在枚举定义、
+  `Book` 的默认值、从数据库读回时的转换三处，没有任何地方把它设成
+  ONGOING 或 COMPLETED
+- **`draft.extra` 全仓库无人消费** —— 引擎把规范外的字段收集好，
+  然后直接丢掉。`Book.metadata` 也永远只从数据库读回，从没被写入过
+
+所以书源里写 `status` 或 `category` 都是白写。现在 `book.fields.status` 会经
+`BookStatus.parse` 映射成枚举，规范外的字段合并进 `Book.metadata`
+（刷新已有书时保留用户写入的其他键）。见规范 §5.5。
+
+`BookStatus.parse` 接受规范值（`ongoing` / `completed` / `unknown`）和常见
+同义写法（`连载中` / `已完结` / `完本` / `finished` …），**认不出来一律降级为
+`unknown`** —— 状态是锦上添花的元数据，不该因为它让整本书登记失败。
+**刻意不接受 `"0"` / `"1"`**：这两个值的含义每个站点都不一样，引擎没有依据
+去猜；书源该用锚定整值的 `regex_replace` 自己转成规范值，
+这样转换规则跟着书源一起被审阅和版本化。
+
+这是第三个「声明了没接线」（前两个 `network.headers` / `network.retry`）。
+
 **`network.headers` 与 `network.retry` 是死配置。** `NetworkPolicy` 声明了
 五个字段，引擎只接了三个，这两个从来没被读过。规范 §8.1 把它们写进了示例，
 **官方参考书源也声明了 `network.headers.User-Agent`** —— 那条配置一直没生效。
@@ -77,9 +109,12 @@ result:
 验证结果：完整目录 **1453 章**（15 页）、正文 2561 字符 / 69 段 /
 无残留标签 / 无伪缩进。站点挂了 Cloudflare 但未拦截。
 
+端到端实跑过一本 7 章的书：下载 7/7 章、0 失败、76,725 字，
+TXT / Markdown / EPUB 三种导出都正常。
+
 该站点 `robots.txt` 禁止 `/search*` 与 `/api*`，所以书源**不提供搜索能力**。
 
-581 个测试，覆盖率 85%。
+606 个测试，覆盖率 85%。
 
 ## [1.0.0rc0] - 2026-10-04
 
@@ -195,7 +230,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`、
   `scripts/check_docs.py`。
-- 581 个测试，覆盖率 85%，门槛设在 70%。桌面端另有 14 个（`npm test`）。
+- 606 个测试，覆盖率 85%，门槛设在 70%。桌面端另有 14 个（`npm test`）。
 
 ### 修复
 

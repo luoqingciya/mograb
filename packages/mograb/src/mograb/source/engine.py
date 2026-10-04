@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from typing import Protocol, runtime_checkable
 from urllib.parse import urljoin
 
-from ..domain.enums import SourceCapability
+from ..domain.enums import BookStatus, SourceCapability
 from ..domain.source import ResultSpec, SourceSpec
 from ..errors import SourceExecutionError, SourceUnsupportedError
 from ..logging.setup import get_logger
@@ -57,6 +57,7 @@ class BookDraft:
     intro: str | None = None
     cover_url: str | None = None
     latest_chapter: str | None = None
+    status: BookStatus = BookStatus.UNKNOWN
     extra: dict[str, str | None] = field(default_factory=dict)
 
 
@@ -265,6 +266,8 @@ class SourceEngine:
             intro=fields.get("intro"),
             cover_url=fields.get("cover"),
             latest_chapter=fields.get("latest_chapter"),
+            # 认不出来时返回 UNKNOWN，不会因为状态字段有问题就让整本书登记失败
+            status=BookStatus.parse(fields.get("status")),
             extra={k: v for k, v in fields.items() if k not in _BOOK_KNOWN},
         )
 
@@ -366,7 +369,7 @@ class SourceEngine:
 
 
 _SEARCH_KNOWN = frozenset({"title", "url", "author", "cover", "intro"})
-_BOOK_KNOWN = frozenset({"id", "title", "author", "intro", "cover", "latest_chapter"})
+_BOOK_KNOWN = frozenset({"id", "title", "author", "intro", "cover", "latest_chapter", "status"})
 
 
 def _derive_book_id(book_url: str) -> str:

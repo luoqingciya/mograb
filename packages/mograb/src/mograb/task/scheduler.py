@@ -270,6 +270,9 @@ class DownloadScheduler:
                     "intro": draft.intro,
                     "cover_url": draft.cover_url,
                     "latest_chapter": draft.latest_chapter,
+                    "status": draft.status,
+                    # 书源自定义字段合并进 metadata，保留用户/其他书源已写入的键
+                    "metadata": {**existing.metadata, **draft.extra},
                     "updated_at": now,
                 }
             )
@@ -286,6 +289,8 @@ class DownloadScheduler:
             intro=draft.intro,
             cover_url=draft.cover_url,
             latest_chapter=draft.latest_chapter,
+            status=draft.status,
+            metadata=dict(draft.extra),
             created_at=now,
             updated_at=now,
         )

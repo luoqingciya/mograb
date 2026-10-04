@@ -273,7 +273,9 @@ class Application:
 
         fmt = str(task.params.get("format") or self.settings.output.format)
         exporter = get_exporter(fmt)
-        target = self.resolve_export_target(book, task.params.get("target"))
+        target = self.resolve_export_target(
+            book, task.params.get("target"), fmt=exporter.format.value
+        )
 
         # API 那边会先建一条 PENDING 记录再把 id 塞进 params，
         # 这样调用方拿到 id 就能查状态。CLI 不给就现建一个。
@@ -336,12 +338,18 @@ class Application:
     # ------------------------------------------------------------------
     # 路径
     # ------------------------------------------------------------------
-    def resolve_export_target(self, book: Book, explicit: str | Path | None = None) -> Path:
+    def resolve_export_target(
+        self, book: Book, explicit: str | Path | None = None, *, fmt: str | None = None
+    ) -> Path:
         """算出导出目标路径。
 
         ``output.directory`` 是相对路径时，相对于**数据目录**而不是 cwd ——
         默认的 ``exports`` 就落在 ``<数据目录>/exports``，和 ``paths.exports_dir``
         是同一个地方。
+
+        ``fmt`` 是**本次实际使用的导出格式**，决定文件扩展名。不传才回落到
+        配置里的默认值 —— 否则 ``mog download -f txt`` 会产出一个内容是纯文本、
+        名字却是 ``.epub`` 的文件（踩过）。
         """
         if explicit:
             return Path(explicit).expanduser()
@@ -349,7 +357,8 @@ class Application:
         configured = Path(self.settings.output.directory)
         directory = configured if configured.is_absolute() else self.paths.root / configured
         name = render_filename(self.settings.output.template, book=book)
-        return directory / f"{name}.{self.settings.output.format}"
+        suffix = fmt or self.settings.output.format
+        return directory / f"{name}.{suffix}"
 
 
 def build_task_manager(
