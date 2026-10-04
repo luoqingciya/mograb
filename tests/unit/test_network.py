@@ -217,12 +217,17 @@ class TestSourceLimiter:
         assert peak <= 2
 
     async def test_min_interval_enforced(self) -> None:
-        limiter = SourceLimiter(concurrency=1, min_interval=0.05)
+        """两次请求之间要满足最小间隔。
+
+        Windows 的定时器精度约 15ms，asyncio.sleep 可能提前返回，所以断言
+        留了余量：3 次调用之间有 2 个 0.1s 间隔，期望 0.2s，只要求 >= 0.12s。
+        """
+        limiter = SourceLimiter(concurrency=1, min_interval=0.1)
         start = time.monotonic()
         for _ in range(3):
             async with limiter.slot():
                 pass
-        assert time.monotonic() - start >= 0.1
+        assert time.monotonic() - start >= 0.12
 
     async def test_releases_on_exception(self) -> None:
         limiter = SourceLimiter(concurrency=1, min_interval=0.0)
