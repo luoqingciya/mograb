@@ -47,10 +47,11 @@ repos:
         files: ^(packages/mograb|apps/(cli|api))/.*\.py$
 
   # ---- 书源 Schema 校验 ----
+  # 书源不进仓库，这里只管本地 sources/ 与测试夹具
   - repo: local
     hooks:
       - id: source-lint
-        name: mograb source lint (changed sources)
+        name: mograb source lint
         entry: uv run mog source lint
         language: system
-        files: ^sources/.*/source\.ya?ml$
+        files: ^(sources|tests/fixtures)/.*/source\.ya?ml$

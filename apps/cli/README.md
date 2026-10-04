@@ -6,7 +6,7 @@
 
 ```bash
 uv run mog --help
-uv run mog source lint sources/official/example/source.yaml
+uv run mog source lint tests/fixtures/example-source/source.yaml
 uv run mog search "三体" --json
 ```
 

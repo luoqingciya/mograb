@@ -138,7 +138,10 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # 书源校验（独立 job，便于快速定位书源问题）
+  # 书源校验
+  #
+  # 书源本身不进仓库，这里只校验 tests/fixtures 下的示例书源 ——
+  # 它是规范的参考实现，挂了说明规范或 linter 出了问题。
   # ---------------------------------------------------------------------------
   source-lint:
     name: Source lint
@@ -157,19 +160,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-packages
 
-      - name: Lint all official sources
+      - name: Lint example source
         shell: bash
         run: |
           set -euo pipefail
           shopt -s globstar nullglob
+          found=0
           failed=0
-          for f in sources/**/source.yaml; do
+          for f in tests/fixtures/**/source.yaml; do
+            found=1
             echo "::group::lint $f"
             if ! uv run mog source lint "$f"; then
               failed=1
             fi
             echo "::endgroup::"
           done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::没找到任何书源夹具，tests/fixtures 是不是被清掉了？"
+            exit 1
+          fi
           exit $failed
 
   # ---------------------------------------------------------------------------

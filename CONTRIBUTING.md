@@ -181,14 +181,20 @@ docs(spec): 冻结 Source Specification v1
 
 ---
 
-## 贡献书源
+## 写书源
 
-书源是本项目最重要的贡献形式。
+书源是本项目最重要的产出，但**不进这个仓库** —— 涉及第三方站点的抓取规则
+不适合随主仓库分发。`sources/` 已经在 `.gitignore` 里，是纯本地的开发目录。
+
+要分享书源，直接发 `source.yaml` 文件，或者打包成 `.mgs`（格式见规范 §11）。
+想在本地留个备份，自己开个私有仓库放着。
 
 ### 目录结构
 
+本地开发时按这个结构放，`mog source lint` 和 fixture 测试都认：
+
 ```
-sources/official/<id>/
+sources/<id>/
 ├── source.yaml          书源定义
 ├── README.md            说明：站点、能力、注意事项
 └── fixtures/
@@ -196,6 +202,8 @@ sources/official/<id>/
     ├── book.html        书籍详情页快照
     └── chapter.html     章节正文页快照
 ```
+
+完整的参考实现在 `tests/fixtures/example-source/`，可以直接拷走改。
 
 ### 步骤
 
@@ -212,16 +220,19 @@ sources/official/<id>/
 
 4. **静态校验**：
    ```bash
-   uv run mog source lint sources/official/<id>/source.yaml
+   uv run mog source lint sources/<id>/source.yaml
    ```
    必须输出 `Result: READY`。
 
-5. **编写测试**：参考 `tests/source/test_example_source.py`
+5. **跑 fixture 测试**：参考 `tests/source/test_example_source.py` 写一份，
+   然后 `uv run pytest tests/source -v`。
 
-6. **运行测试**：
-   ```bash
-   uv run pytest tests/source -v
-   ```
+### 想给项目提交书源相关代码
+
+如果改的是 linter、提取器、变换算子这类**框架能力**，欢迎提 PR ——
+这类改动需要带上 `tests/fixtures/` 下的测试数据。
+
+如果只是想加一个新站点的书源，不用提 PR，自己留着就行。
 
 ### 书源要求
 

@@ -120,7 +120,7 @@ version: 1.0.0         # str，必填，必须符合 SemVer
 
 - 与规划书 §7 的示例字面不一致 —— 已在
   `docs/source-spec/source-spec-v1.md` 与
-  `sources/official/example/source.yaml` 中同步说明
+  `tests/fixtures/example-source/source.yaml` 中同步说明
 - 若已有按 §7 写法编写的书源，需迁移（当前无存量书源，成本为零）
 
 ### 需要跟进

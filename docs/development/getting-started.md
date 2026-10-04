@@ -117,7 +117,7 @@ uv run pyright                                 # 类型检查
 
 # CLI
 uv run mog --help
-uv run mog source lint sources/official/example/source.yaml
+uv run mog source lint tests/fixtures/example-source/source.yaml
 uv run mog config path
 
 # API
@@ -142,7 +142,7 @@ uv run python -c "from mograb_api.main import create_app; print(len(create_app()
 
 测试默认离线。需要真实网络的测试必须标 `@pytest.mark.network`，CI 里默认跳过。
 
-书源测试用 `sources/*/fixtures/*.html` 快照。站点改版后先用 fixture 复现问题，
+书源测试用 `tests/fixtures/` 下的 HTML 快照。站点改版后先用 fixture 复现问题，
 再改规则（规划书 §12）。
 
 ### 4.2 数据目录隔离
@@ -251,15 +251,15 @@ v1.0.0  规范稳定
 4. 提交 PR 到 `develop`，说明动机、方案与测试情况
 5. 涉及架构决策的改动，需同时提交 ADR
 
-### 7.1 书源贡献
+### 7.1 书源
 
-书源存放在独立仓库 `MoGrab-Sources`（规划书 §45），
-但官方书源位于本仓库的 `sources/official/`。
+书源不进这个仓库，`sources/` 已经在 `.gitignore` 里，是你本地的开发目录。
 
-新增书源必须包含：
+如果改的是 linter、提取器、变换算子这类框架能力，欢迎提 PR。
+这类改动需要带上 `tests/fixtures/` 下的测试数据，结构是：
 
 ```
-sources/official/<id>/
+tests/fixtures/<name>-source/
 ├── source.yaml
 ├── README.md
 └── fixtures/
@@ -268,7 +268,10 @@ sources/official/<id>/
     └── chapter.html
 ```
 
-并附带 `tests/source/test_<id>_source.py`。
+并附带 `tests/source/test_<name>_source.py`。
+`tests/fixtures/example-source/` 就是照着这个来的。
+
+如果只是想加一个新站点的书源，不用提 PR，自己留着用就行。
 
 ---
 

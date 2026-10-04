@@ -24,7 +24,7 @@ MoGrab 核心引擎：声明式书源（Source DSL）、网络层、任务引擎
 ```python
 from mograb.source import load_source_file, SourceEngine, lint
 
-spec = load_source_file("sources/official/example/source.yaml")
+spec = load_source_file("tests/fixtures/example-source/source.yaml")
 report = lint(spec)
 assert report.is_ready
 ```

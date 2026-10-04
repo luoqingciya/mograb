@@ -17,8 +17,8 @@ from mograb.domain.chapter import Chapter
 from mograb.domain.enums import BookStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCES_DIR = REPO_ROOT / "sources"
-EXAMPLE_SOURCE = SOURCES_DIR / "official" / "example"
+# 示例书源放在测试夹具里，不放 sources/ —— 书源不进远程仓库
+EXAMPLE_SOURCE = REPO_ROOT / "tests" / "fixtures" / "example-source"
 
 
 @pytest.fixture(autouse=True)

@@ -15,7 +15,7 @@ push / PR → main, develop
 │ version       VERSION 格式与来源唯一性     │
 │ type-check    pyright                     │
 │ test          矩阵：{3.11,3.12} × {linux,windows} │
-│ source-lint   所有官方书源                │
+│ source-lint   tests/fixtures 下的参考书源   │
 │ build         uv build --all-packages     │
 └───────────────────────────────────────────┘
 ```
@@ -54,7 +54,7 @@ uv run pyright
 uv run pytest -m "not network" --cov
 
 # 书源
-for f in sources/**/source.yaml; do uv run mog source lint "$f"; done
+for f in tests/fixtures/**/source.yaml; do uv run mog source lint "$f"; done
 
 # 构建
 uv build --all-packages --out-dir dist

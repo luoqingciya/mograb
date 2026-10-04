@@ -62,7 +62,7 @@ cd mograb
 uv sync --all-packages
 
 # 校验一个书源
-uv run mog source lint sources/official/example/source.yaml
+uv run mog source lint tests/fixtures/example-source/source.yaml
 
 # 跑测试
 uv run pytest -q
@@ -120,10 +120,14 @@ MoGrab/
 │   ├── cli/             命令行，命令名 mog
 │   ├── api/             本地 API，FastAPI
 │   └── desktop/         桌面端，Electron
-├── sources/             官方与社区书源
+├── sources/             本地书源工作区（不进仓库）
 ├── tests/               单元 / 集成 / 书源 fixture
 └── docs/                文档
 ```
+
+书源不进远程仓库 —— 涉及第三方站点的抓取规则不适合随主仓库分发。
+`sources/` 已在 `.gitignore` 里，留给你本地开发和调试。
+规范的参考实现和测试数据放在 `tests/fixtures/example-source/`。
 
 架构上就一条硬规则：CLI 和桌面端都不许自己实现业务逻辑，一切走 Core 或 API。
 其他的边界写在[架构总览](docs/architecture/overview.md)里。

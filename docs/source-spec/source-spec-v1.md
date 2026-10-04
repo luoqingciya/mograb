@@ -435,7 +435,7 @@ my-source-1.0.0.mgs   (ZIP)
 
 ## 12. 完整示例
 
-见 `sources/official/example/source.yaml`，该示例：
+见 `tests/fixtures/example-source/source.yaml`，该示例：
 
 - 演示全部四种能力
 - 演示条件化 `url_join`
@@ -445,7 +445,7 @@ my-source-1.0.0.mgs   (ZIP)
 验证：
 
 ```bash
-uv run mog source lint sources/official/example/source.yaml
+uv run mog source lint tests/fixtures/example-source/source.yaml
 uv run pytest tests/source -v
 ```
 

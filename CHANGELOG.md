@@ -64,7 +64,11 @@
 
 ### 书源
 
-`sources/official/example`，官方参考书源，带三个 HTML fixture。
+参考书源放在 `tests/fixtures/example-source/`，带三个 HTML 快照，
+兼做 fixture 测试的数据。用 `example.com`（IANA 保留域名），不指向真实站点。
+
+**书源本身不进仓库。** `sources/` 已加进 `.gitignore`，留给本地开发。
+理由见 [架构总览](docs/architecture/overview.md#书源为什么不进仓库)。
 
 ### 工程
 

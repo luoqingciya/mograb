@@ -67,12 +67,12 @@ MoGrab/
 │   ├── api/                    mograb-api，FastAPI
 │   └── desktop/                Electron，仅 Windows
 │
-├── sources/
-│   ├── official/               官方书源
-│   └── community/              社区书源
+├── sources/                   本地书源工作区，不进仓库（见下）
 │
 ├── tests/
-│   ├── unit/  integration/  source/  fixtures/
+│   ├── unit/  integration/  source/
+│   └── fixtures/
+│       └── example-source/    参考书源 + HTML 快照，兼测试数据
 │
 ├── docs/
 │   ├── architecture/           本目录
@@ -86,6 +86,21 @@ MoGrab/
 ├── scripts/
 └── .github/workflows/
 ```
+
+### 书源为什么不进仓库
+
+`sources/` 在 `.gitignore` 里，永远不提交。原因是书源描述的是针对具体第三方站点的
+抓取规则，把它随主仓库一起分发，容易让项目被误解成"某个站点的专用工具"，
+也会把站点改版、失效、条款变动这些事带进主仓库的历史里。
+
+所以职责拆成两半：
+
+- **主仓库**只提供规范、引擎和工具链。参考实现放在 `tests/fixtures/example-source/`，
+  用 `example.com`（IANA 保留域名），不指向任何真实站点。
+- **书源**由使用者自己写、自己留。要分享就直接发 `source.yaml` 或 `.mgs` 文件。
+
+这条边界也让 CI 更干净：`source-lint` 只校验仓库里的参考实现，
+不会因为某个外部站点挂掉就红。
 
 ### 为什么只有一个核心包
 
