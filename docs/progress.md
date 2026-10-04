@@ -33,7 +33,7 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 |------|------|------|-------|
 | v0.1.0 | Core Prototype | **达成** | — |
 | v0.2.0 | Task System | **基本达成** | 大量章节的稳定性没在真实站点验证过 |
-| v0.3.0 | Source Ecosystem | **部分** | Source Registry、`source test`、版本回滚 |
+| v0.3.0 | Source Ecosystem | **部分** | `mog source test`、Registry、真正的版本历史与回滚 |
 | v0.4.0 | API | **达成** | — |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
 | v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
@@ -64,12 +64,31 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 ### v0.3.0 逐项
 
+目标：第三方开发者可以编写和维护 Source。
+
 ```
 ✓ Source Linter          ✗ Source Test（CLI 命令）
 ✓ Fixture Test           ✗ Registry
-✓ Source Version         ✗ Update / Rollback
-✓ Install
+✓ Source Version         ⚠ Update（记版本但不留旧文件）
+✓ Install                ✗ Rollback（见下）
 ```
+
+**Rollback 是「假承诺」，比单纯缺失更糟。** `sources` 表里有
+`installed_version` / `previous_version` 两列，install 也确实会把旧版本号记进去，
+`mog source show` 于是会打印「可回滚到 1.0.0」。但实际上：
+
+1. **没有 `mog source rollback` 命令** —— 试了，报 `No such command`
+2. **旧版本的定义文件根本没保留** —— 磁盘上是 `data/sources/<id>/source.yaml`
+   单个文件，新版本直接覆盖。规划书 §56 要的 `1.2.0/` `1.1.0/` `current`
+   目录结构不存在
+
+所以那句「可回滚到 X」是**误导** —— 它给了错误的安全感，用户会以为
+升级出问题能退回去。**要么把回滚做出来，要么把那行提示去掉**，
+不能停在中间状态。
+
+install 本身是稳的：装之前先 lint，有 ERROR 就拒绝（除非 `--force`），
+所以「装一个跑不起来的书源」不会发生。但**lint 通过、运行时才发现站点改版**
+的情况仍会直接覆盖，没有退路。
 
 ### v0.4.0 逐项
 
