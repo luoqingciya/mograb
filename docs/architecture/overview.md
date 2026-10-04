@@ -287,7 +287,7 @@ Parser / Transformer    已实现，有测试
         ↓
 HTTP Layer              已实现，有测试
         ↓
-Storage                 仓储骨架就位，Source / Export 仓储待补
+Storage                 仓储已全部实现，含书源、导出与 HTTP 缓存
         ↓
 Task Engine             状态机、队列、Worker 已实现，调度待接
         ↓

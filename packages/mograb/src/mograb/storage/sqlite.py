@@ -14,11 +14,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -28,14 +32,28 @@ from sqlalchemy.ext.asyncio import (
 
 from ..domain.book import Book
 from ..domain.chapter import Chapter
-from ..domain.enums import BookStatus, TaskStatus, TaskType
+from ..domain.enums import (
+    BookStatus,
+    ExportFormat,
+    ExportStatus,
+    HealthStatus,
+    TaskStatus,
+    TaskType,
+)
+from ..domain.export import ExportRecord
+from ..domain.source import SOURCE_ID_RE, InstalledSource, SourceSpec
 from ..domain.task import Task, TaskItem
 from ..logging.setup import get_logger
+from ..network.cache import CacheEntry
+from ..source.loader import load_source_file, write_source_file
 from .models import (
     Base,
     BookRow,
     ChapterRow,
+    ExportRow,
+    HttpCacheRow,
     SettingRow,
+    SourceRow,
     TaskItemRow,
     TaskRow,
     utc_now_iso,
@@ -285,6 +303,391 @@ class SqliteSettingsRepository:
 
 
 # ---------------------------------------------------------------------------
+# 书源仓储
+# ---------------------------------------------------------------------------
+class SqliteSourceRepository:
+    """书源仓储：磁盘存定义，数据库存记账。
+
+    分工是这样的：
+
+    - ``<sources_dir>/<id>/source.yaml`` 是**定义的唯一真相**。用户可以自己
+      往里丢文件，换机器直接拷目录。
+    - 数据库那张表只记「装没装、启没启用、体检结果、从哪个版本升上来的」，
+      这些不属于书源定义，导出书源时也不该带出去。
+
+    因此索引丢了不是灾难 —— :meth:`rescan` 能从磁盘重建。
+    反过来文件丢了，索引里的那行就没意义，会被跳过。
+    """
+
+    def __init__(self, db: Database, sources_dir: Path) -> None:
+        self._db = db
+        self._dir = Path(sources_dir)
+
+    def source_path(self, source_id: str) -> Path:
+        """书源定义文件的位置。"""
+        return self._dir / source_id / "source.yaml"
+
+    # ------------------------------------------------------------------
+    async def get(self, source_id: str) -> InstalledSource | None:
+        async with self._db.session() as session:
+            row = await session.get(SourceRow, source_id)
+            if row is None:
+                return None
+            meta = _source_meta(row)
+
+        spec = await asyncio.to_thread(_read_source_spec, self.source_path(source_id))
+        if spec is None:
+            # 索引里有、磁盘上没有 —— 数据不一致，当没装处理
+            _logger.warning("storage.source_file_missing", source_id=source_id)
+            return None
+        return InstalledSource(spec=spec, **meta)
+
+    async def save(self, source: SourceSpec) -> None:
+        """安装或覆盖。先落盘再写索引 —— 磁盘写失败就不该留下索引。"""
+        await asyncio.to_thread(write_source_file, source, self.source_path(source.id))
+
+        now = utc_now_iso()
+        async with self._db.transaction() as session:
+            row = await session.get(SourceRow, source.id)
+            if row is None:
+                session.add(
+                    SourceRow(
+                        id=source.id,
+                        name=source.name,
+                        version=source.version,
+                        spec_version=source.spec_version,
+                        homepage=source.homepage,
+                        license=source.license,
+                        capabilities=[c.value for c in source.capabilities],
+                        enabled=True,
+                        installed_version=source.version,
+                        previous_version=None,
+                        health=HealthStatus.UNKNOWN.value,
+                        installed_at=now,
+                        updated_at=now,
+                    )
+                )
+                return
+
+            row.name = source.name
+            row.version = source.version
+            row.spec_version = source.spec_version
+            row.homepage = source.homepage
+            row.license = source.license
+            row.capabilities = [c.value for c in source.capabilities]
+            row.updated_at = now
+            # 版本真变了才记 previous。同版本重装不该把回滚点冲掉。
+            if row.installed_version != source.version:
+                row.previous_version = row.installed_version
+                row.installed_version = source.version
+
+    async def list_all(self) -> list[InstalledSource]:
+        async with self._db.session() as session:
+            rows = (await session.execute(select(SourceRow))).scalars().all()
+            entries = [(row.id, _source_meta(row)) for row in rows]
+
+        installed: list[InstalledSource] = []
+        for source_id, meta in entries:
+            spec = await asyncio.to_thread(_read_source_spec, self.source_path(source_id))
+            if spec is None:
+                _logger.warning("storage.source_file_missing", source_id=source_id)
+                continue
+            installed.append(InstalledSource(spec=spec, **meta))
+        return installed
+
+    async def list_enabled(self) -> list[InstalledSource]:
+        """启用且未失效的书源。调度器挑源时用这个。"""
+        return [entry for entry in await self.list_all() if entry.is_usable]
+
+    async def delete(self, source_id: str) -> bool:
+        # 目录名来自 ID，先挡住越界输入再动文件系统
+        if not SOURCE_ID_RE.match(source_id):
+            return False
+
+        async with self._db.transaction() as session:
+            row = await session.get(SourceRow, source_id)
+            if row is None:
+                return False
+            await session.delete(row)
+
+        target = self._dir / source_id
+        if target.is_dir():
+            await asyncio.to_thread(shutil.rmtree, target, True)
+        return True
+
+    async def set_enabled(self, source_id: str, enabled: bool) -> None:
+        async with self._db.transaction() as session:
+            row = await session.get(SourceRow, source_id)
+            if row is None:
+                from ..errors import SourceNotFoundError
+
+                raise SourceNotFoundError(
+                    f"书源未安装: {source_id}", details={"source_id": source_id}
+                )
+            row.enabled = enabled
+            row.updated_at = utc_now_iso()
+
+    async def set_health(self, source_id: str, health: HealthStatus) -> None:
+        async with self._db.transaction() as session:
+            row = await session.get(SourceRow, source_id)
+            if row is None:
+                from ..errors import SourceNotFoundError
+
+                raise SourceNotFoundError(
+                    f"书源未安装: {source_id}", details={"source_id": source_id}
+                )
+            row.health = health.value
+            row.updated_at = utc_now_iso()
+
+    async def rescan(self) -> list[InstalledSource]:
+        """用磁盘上的定义重建索引。
+
+        手改过 ``source.yaml``、或者把整个 data 目录拷到另一台机器上时用。
+        已存在的行只更新定义相关的字段，``enabled`` 和 ``health`` 保留 ——
+        用户手动改过的开关不该被一次扫描重置。
+        """
+        if not self._dir.is_dir():
+            return []
+
+        found: list[SourceSpec] = []
+        for path in sorted(self._dir.glob("*/source.yaml")):
+            spec = await asyncio.to_thread(_read_source_spec, path)
+            if spec is not None:
+                found.append(spec)
+
+        now = utc_now_iso()
+        found_ids = {spec.id for spec in found}
+        async with self._db.transaction() as session:
+            existing = {row.id: row for row in (await session.execute(select(SourceRow))).scalars()}
+            for spec in found:
+                row = existing.get(spec.id)
+                if row is None:
+                    session.add(
+                        SourceRow(
+                            id=spec.id,
+                            name=spec.name,
+                            version=spec.version,
+                            spec_version=spec.spec_version,
+                            homepage=spec.homepage,
+                            license=spec.license,
+                            capabilities=[c.value for c in spec.capabilities],
+                            enabled=True,
+                            installed_version=spec.version,
+                            previous_version=None,
+                            health=HealthStatus.UNKNOWN.value,
+                            installed_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    continue
+                row.name = spec.name
+                row.version = spec.version
+                row.spec_version = spec.spec_version
+                row.homepage = spec.homepage
+                row.license = spec.license
+                row.capabilities = [c.value for c in spec.capabilities]
+                row.installed_version = spec.version
+                row.updated_at = now
+
+            # 磁盘上没有的，索引里也不该留着
+            for source_id, row in existing.items():
+                if source_id not in found_ids:
+                    await session.delete(row)
+
+        return await self.list_all()
+
+
+# ---------------------------------------------------------------------------
+# 导出记录仓储
+# ---------------------------------------------------------------------------
+class SqliteExportRepository:
+    """导出作业记录。
+
+    导出是异步的（§29），所以这里存的是作业状态：创建时 PENDING，
+    跑完变 SUCCESS 或 FAILED。``path`` 在完成前是 None。
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def save(self, record: ExportRecord) -> None:
+        async with self._db.transaction() as session:
+            row = await session.get(ExportRow, record.id)
+            if row is None:
+                session.add(_to_export_row(record))
+            else:
+                _apply_export(record, row)
+
+    async def get(self, export_id: str) -> ExportRecord | None:
+        async with self._db.session() as session:
+            row = await session.get(ExportRow, export_id)
+            return _to_export(row) if row else None
+
+    async def list_by_book(self, book_id: str) -> list[ExportRecord]:
+        async with self._db.session() as session:
+            stmt = (
+                select(ExportRow)
+                .where(ExportRow.book_id == book_id)
+                .order_by(ExportRow.created_at.desc())
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_to_export(r) for r in rows]
+
+    async def list_recent(self, *, limit: int = 50) -> list[ExportRecord]:
+        async with self._db.session() as session:
+            stmt = select(ExportRow).order_by(ExportRow.created_at.desc()).limit(limit)
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_to_export(r) for r in rows]
+
+    async def delete(self, export_id: str) -> bool:
+        async with self._db.transaction() as session:
+            row = await session.get(ExportRow, export_id)
+            if row is None:
+                return False
+            await session.delete(row)
+            return True
+
+
+# ---------------------------------------------------------------------------
+# HTTP 缓存
+# ---------------------------------------------------------------------------
+ACCESS_REFRESH_INTERVAL = timedelta(hours=1)
+"""命中时间的更新粒度。
+
+严格 LRU 要在每次读取时回写 ``accessed_at``，代价是缓存命中变成一次写库。
+这里按小时粒度更新：够用来做容量淘汰的排序，又不会让读操作频繁触发写入。
+"""
+
+
+class SqliteHttpCache:
+    """HTTP 缓存的 SQLite 实现（规划书 §16）。
+
+    失效分三层，这里都有：
+
+    - **TTL**：条目自带 ``expires_at``，读的时候发现过期就顺手删掉
+    - **显式**：``invalidate_url`` / ``invalidate_source`` / ``clear``
+    - **容量**：``max_size_bytes`` 满了按「最久未访问」淘汰
+
+    ``max_size_bytes`` 传 0 表示不限容量（测试和临时用）。
+    """
+
+    def __init__(self, db: Database, *, max_size_bytes: int = 0) -> None:
+        self._db = db
+        self._max_size_bytes = max(0, max_size_bytes)
+
+    # ------------------------------------------------------------------
+    async def get(self, key: str) -> CacheEntry | None:
+        now = datetime.now(UTC)
+        async with self._db.transaction() as session:
+            row = await session.get(HttpCacheRow, key)
+            if row is None:
+                return None
+
+            if _parse_dt(row.expires_at) <= now:
+                await session.delete(row)
+                return None
+
+            # 近似 LRU：只有距上次记录超过一小时才回写，避免每次读都写库
+            accessed = _parse_dt(row.accessed_at)
+            if now - accessed >= ACCESS_REFRESH_INTERVAL:
+                row.accessed_at = now.isoformat()
+
+            return _to_cache_entry(row)
+
+    async def put(self, entry: CacheEntry) -> None:
+        async with self._db.transaction() as session:
+            row = await session.get(HttpCacheRow, entry.key)
+            if row is None:
+                session.add(_to_cache_row(entry))
+            else:
+                _apply_cache_entry(entry, row)
+
+        await self.enforce_capacity()
+
+    async def invalidate_url(self, source_id: str, url: str) -> int:
+        async with self._db.transaction() as session:
+            result = await session.execute(
+                delete(HttpCacheRow).where(
+                    HttpCacheRow.source_id == source_id,
+                    HttpCacheRow.url == url,
+                )
+            )
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    async def invalidate_source(self, source_id: str) -> int:
+        async with self._db.transaction() as session:
+            result = await session.execute(
+                delete(HttpCacheRow).where(HttpCacheRow.source_id == source_id)
+            )
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    async def clear(self) -> int:
+        async with self._db.transaction() as session:
+            result = await session.execute(delete(HttpCacheRow))
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    async def stats(self) -> dict[str, int]:
+        async with self._db.session() as session:
+            count, total = (
+                await session.execute(
+                    select(
+                        func.count(HttpCacheRow.key),
+                        func.coalesce(func.sum(HttpCacheRow.size_bytes), 0),
+                    )
+                )
+            ).one()
+        return {
+            "entries": int(count),
+            "size_bytes": int(total),
+            "max_size_bytes": self._max_size_bytes,
+        }
+
+    # ------------------------------------------------------------------
+    async def purge_expired(self) -> int:
+        """清掉已过期的条目。返回删除数量。"""
+        async with self._db.transaction() as session:
+            result = await session.execute(
+                delete(HttpCacheRow).where(HttpCacheRow.expires_at <= datetime.now(UTC).isoformat())
+            )
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    async def enforce_capacity(self) -> int:
+        """超出容量上限时按最久未访问淘汰。返回淘汰数量。
+
+        一次查询拿全量 (key, size) 排序后累减，再一条 DELETE 批量删 ——
+        比循环「查一条删一条」少很多次往返。
+        """
+        if self._max_size_bytes <= 0:
+            return 0
+
+        async with self._db.transaction() as session:
+            rows = (
+                await session.execute(
+                    select(HttpCacheRow.key, HttpCacheRow.size_bytes).order_by(
+                        HttpCacheRow.accessed_at
+                    )
+                )
+            ).all()
+            total = sum(size for _, size in rows)
+            if total <= self._max_size_bytes:
+                return 0
+
+            doomed: list[str] = []
+            for key, size in rows:
+                if total <= self._max_size_bytes:
+                    break
+                doomed.append(key)
+                total -= size
+
+            if doomed:
+                await session.execute(delete(HttpCacheRow).where(HttpCacheRow.key.in_(doomed)))
+
+        if doomed:
+            _logger.info("storage.cache_evicted", removed=len(doomed))
+        return len(doomed)
+
+
+# ---------------------------------------------------------------------------
 # 映射辅助
 # ---------------------------------------------------------------------------
 async def _upsert_book(session: AsyncSession, book: Book) -> None:
@@ -470,17 +873,111 @@ def _apply_task_item(item: TaskItem, row: TaskItemRow) -> None:
     row.updated_at = item.updated_at.isoformat()
 
 
-def _parse_dt(value: str):
-    """解析 ISO 时间戳。"""
-    from datetime import datetime
+def _source_meta(row: SourceRow) -> dict[str, Any]:
+    """把书源行里「不属于书源定义」的字段抽成字典。
 
+    单独抽出来是因为后面要出 session 读文件，不能挂着 ORM 实例到处跑。
+    """
+    return {
+        "enabled": row.enabled,
+        "health": HealthStatus(row.health),
+        "installed_version": row.installed_version,
+        "previous_version": row.previous_version,
+        "installed_at": _parse_dt(row.installed_at) if row.installed_at else None,
+        "updated_at": _parse_dt(row.updated_at) if row.updated_at else None,
+    }
+
+
+def _read_source_spec(path: Path) -> SourceSpec | None:
+    """读一个书源定义文件，失败返回 None。
+
+    单个书源坏掉不该让整个 ``list_all()`` 崩掉 —— 用户可能手改错了某一份，
+    其余书源还得能用。调用方负责打日志。
+    """
+    if not path.is_file():
+        return None
+    try:
+        return load_source_file(path)
+    except Exception as exc:
+        _logger.warning("storage.source_load_failed", path=str(path), error=str(exc))
+        return None
+
+
+def _to_export(row: ExportRow) -> ExportRecord:
+    return ExportRecord(
+        id=row.id,
+        book_id=row.book_id,
+        format=ExportFormat(row.format),
+        status=ExportStatus(row.status),
+        path=row.path,
+        size_bytes=row.size_bytes,
+        error_message=row.error_message,
+        created_at=_parse_dt(row.created_at),
+        finished_at=_parse_dt(row.finished_at) if row.finished_at else None,
+    )
+
+
+def _to_export_row(record: ExportRecord) -> ExportRow:
+    row = ExportRow(id=record.id)
+    _apply_export(record, row)
+    row.created_at = record.created_at.isoformat()
+    return row
+
+
+def _apply_export(record: ExportRecord, row: ExportRow) -> None:
+    row.book_id = record.book_id
+    row.format = record.format.value
+    row.status = record.status.value
+    row.path = record.path
+    row.size_bytes = record.size_bytes
+    row.error_message = record.error_message
+    row.finished_at = record.finished_at.isoformat() if record.finished_at else None
+
+
+def _to_cache_entry(row: HttpCacheRow) -> CacheEntry:
+    return CacheEntry(
+        key=row.key,
+        source_id=row.source_id,
+        url=row.url,
+        status_code=row.status_code,
+        content=row.content,
+        encoding=row.encoding,
+        created_at=_parse_dt(row.created_at),
+        expires_at=_parse_dt(row.expires_at),
+    )
+
+
+def _to_cache_row(entry: CacheEntry) -> HttpCacheRow:
+    row = HttpCacheRow(key=entry.key)
+    _apply_cache_entry(entry, row)
+    row.created_at = entry.created_at.isoformat()
+    row.accessed_at = datetime.now(UTC).isoformat()
+    return row
+
+
+def _apply_cache_entry(entry: CacheEntry, row: HttpCacheRow) -> None:
+    row.source_id = entry.source_id
+    row.url = entry.url
+    row.status_code = entry.status_code
+    row.content = entry.content
+    row.encoding = entry.encoding
+    row.expires_at = entry.expires_at.isoformat()
+    row.size_bytes = entry.size
+
+
+def _parse_dt(value: str) -> datetime:
+    """解析 ISO 时间戳。"""
     return datetime.fromisoformat(value)
 
 
 __all__ = [
+    "ACCESS_REFRESH_INTERVAL",
     "Database",
     "SqliteBookRepository",
     "SqliteChapterRepository",
+    "SqliteExportRepository",
+    "SqliteHttpCache",
     "SqliteSettingsRepository",
+    "SqliteSourceRepository",
     "SqliteTaskRepository",
 ]

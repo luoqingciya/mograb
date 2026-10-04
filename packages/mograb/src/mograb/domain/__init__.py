@@ -21,6 +21,7 @@ from .enums import (
     TaskType,
     can_transition,
 )
+from .export import ExportRecord
 from .source import (
     SPEC_VERSION,
     BookSpec,
@@ -28,6 +29,7 @@ from .source import (
     CleanSpec,
     ContentSpec,
     ExtractRule,
+    InstalledSource,
     NetworkPolicy,
     Permissions,
     RequestSpec,
@@ -54,9 +56,11 @@ __all__ = [
     "CleanSpec",
     "ContentSpec",
     "ExportFormat",
+    "ExportRecord",
     "ExportStatus",
     "ExtractRule",
     "HealthStatus",
+    "InstalledSource",
     "NetworkPolicy",
     "Permissions",
     "RequestSpec",

@@ -41,7 +41,10 @@
 - `task` —— 队列、Worker 池、生命周期管理。`TaskManager.start()` 会先把
   上次进程崩溃留下的 RUNNING / RETRYING 任务标成 FAILED，而不是让它们
   在界面上永远转圈。增量更新用 `compute_chapter_diff` 这个纯函数算。
-- `storage` —— SQLAlchemy 2.0 映射 8 张表，6 个仓储协议，SQLite 实现开了 WAL。
+- `storage` —— SQLAlchemy 2.0 映射 8 张表，7 个仓储实现，SQLite 开了 WAL。
+  书源仓储把定义放磁盘、把本机记账放数据库，索引能从磁盘重建；
+  HTTP 缓存实现三层失效（TTL / 显式 / 容量），容量满了按最久未访问淘汰。
+  批量写入走单事务，避免「下载成功但库里只有一半」。
   批量写入走单事务，避免"下载成功但库里只有一半"。
 - `content` —— 清洗分 DOM 级和文本级，内置了常见水印行过滤。
   校验阈值收在 `ContentPolicy` 里，不硬编码。
@@ -101,7 +104,6 @@
 
 ### 还没做
 
-- `SourceRepository` / `ExportRepository` 没实现
 - `DownloadScheduler.run()` 和 `plan_update()` 没接线
 - CLI 除了 `source lint`、`config`，API 除了 `/health`，其余都是骨架
 - API 没有认证，只有 CORS

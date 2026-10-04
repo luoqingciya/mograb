@@ -115,7 +115,7 @@ def make_entry(
     url: str,
     status_code: int,
     content: bytes,
-    encoding: str | None,
+    encoding: str | None = None,
     ttl_seconds: int = TTL_DEFAULT,
 ) -> CacheEntry:
     """构造一条带过期时间的缓存记录。"""

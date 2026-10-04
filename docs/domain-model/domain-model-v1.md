@@ -78,6 +78,27 @@ source.supports(SourceCapability.SEARCH) -> bool
 
 Core **不得假定**能力存在。未声明能力时调用对应方法抛 `SourceUnsupportedError`。
 
+### 2.2 InstalledSource
+
+`SourceSpec` 只包含规范里定义的字段，是书源作者写的东西。
+「装没装、启没启用、体检什么结果、从哪个版本升上来的」属于 MoGrab 自己的记账，
+放在 `InstalledSource` 里：
+
+```python
+class InstalledSource:
+    spec: SourceSpec
+    enabled: bool
+    health: HealthStatus
+    installed_version: str
+    previous_version: str | None
+    installed_at: datetime | None
+    updated_at: datetime | None
+```
+
+分开的理由：导出书源时不该把本机状态带出去。存储层返回这个类型，
+调度器取 `entry.spec` 用即可，挑源时用 `entry.is_usable`
+（启用，且健康度不是 broken / unsupported）。
+
 ---
 
 ## 3. Book
@@ -309,7 +330,31 @@ class TaskItem:
 
 ---
 
-## 6. 枚举清单
+## 6. ExportRecord
+
+```python
+class ExportRecord:
+    id: str
+    book_id: str
+    format: ExportFormat
+    status: ExportStatus
+    path: str | None  # 完成前是 None
+    size_bytes: int
+    error_message: str | None
+    created_at: datetime
+    finished_at: datetime | None
+```
+
+导出是**异步作业**（API v1 §4.7）：创建时返回 id，之后查状态。
+所以这条记录要能表达「排队中 → 进行中 → 完成/失败」的整个过程，
+而不只是一条历史流水。`path` 在作业完成前拿不到 —— 这正是当初把导出
+裁决成异步的原因之一。
+
+`is_terminal` 判断是否已结束（成功或失败）。
+
+---
+
+## 7. 枚举清单
 
 | 枚举 | 取值 |
 |------|------|
@@ -327,7 +372,7 @@ class TaskItem:
 
 ---
 
-## 7. 错误层次
+## 8. 错误层次
 
 ```
 MoGrabError                       code: MOGRAB_ERROR
@@ -381,7 +426,7 @@ HTTP 状态码映射见 [`api-v1.md`](../api/api-v1.md) §6。
 
 ---
 
-## 8. 变更政策
+## 9. 变更政策
 
 | 变更 | 处理 |
 |------|------|

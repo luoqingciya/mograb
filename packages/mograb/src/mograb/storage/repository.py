@@ -14,24 +14,43 @@ from typing import Protocol, runtime_checkable
 
 from ..domain.book import Book
 from ..domain.chapter import Chapter
-from ..domain.enums import TaskStatus
-from ..domain.source import SourceSpec
+from ..domain.enums import HealthStatus, TaskStatus
+from ..domain.export import ExportRecord
+from ..domain.source import InstalledSource, SourceSpec
 from ..domain.task import Task, TaskItem
 
 
 @runtime_checkable
 class SourceRepository(Protocol):
-    """书源仓储。"""
+    """书源仓储。
 
-    async def get(self, source_id: str) -> SourceSpec | None: ...
+    书源定义存在磁盘上（``<sources_dir>/<id>/source.yaml``），
+    数据库只存「装没装、启没启用、体检结果、版本历史」这类本机记账。
+    所以这个仓储同时碰文件系统和数据库 —— 它持久化的是整个
+    :class:`InstalledSource` 聚合，而不只是一行数据。
+    """
 
-    async def save(self, source: SourceSpec) -> None: ...
+    async def get(self, source_id: str) -> InstalledSource | None: ...
 
-    async def list_all(self) -> list[SourceSpec]: ...
+    async def save(self, source: SourceSpec) -> None:
+        """安装或覆盖一个书源。已存在时把当前版本记进 previous_version。"""
+        ...
+
+    async def list_all(self) -> list[InstalledSource]: ...
+
+    async def list_enabled(self) -> list[InstalledSource]:
+        """只返回启用且未失效的，调度器挑书源用这个。"""
+        ...
 
     async def delete(self, source_id: str) -> bool: ...
 
     async def set_enabled(self, source_id: str, enabled: bool) -> None: ...
+
+    async def set_health(self, source_id: str, health: HealthStatus) -> None: ...
+
+    async def rescan(self) -> list[InstalledSource]:
+        """用磁盘上的定义重建索引。手改过文件、或换机器拷过来时用。"""
+        ...
 
 
 @runtime_checkable
@@ -87,11 +106,18 @@ class TaskRepository(Protocol):
 
 @runtime_checkable
 class ExportRepository(Protocol):
-    """导出记录仓储。"""
+    """导出记录仓储。
 
-    async def save(self, record: object) -> None: ...
+    导出是异步作业（§29），所以这里存的是作业状态而非成品流水。
+    """
 
-    async def list_by_book(self, book_id: str) -> list[object]: ...
+    async def save(self, record: ExportRecord) -> None: ...
+
+    async def get(self, export_id: str) -> ExportRecord | None: ...
+
+    async def list_by_book(self, book_id: str) -> list[ExportRecord]: ...
+
+    async def list_recent(self, *, limit: int = ...) -> list[ExportRecord]: ...
 
 
 @runtime_checkable

@@ -31,12 +31,21 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
-from .enums import SourceCapability
+from .enums import HealthStatus, SourceCapability
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -182,6 +191,15 @@ class ExtractRule(BaseModel):
         if self.type is RuleType.CSS:
             return self.expression
         return f"{self.type.value}:{self.expression}"
+
+    @model_serializer(mode="plain")
+    def _to_dsl_string(self) -> str:
+        """序列化回 DSL 字符串（``a@href``），而不是 ``{type, expression}`` 字典。
+
+        书源是要给人看、给人改的。存回 YAML 时如果变成一坨嵌套字典，
+        就没法手工维护了，所以这里保持原样。
+        """
+        return self.raw
 
 
 def _parse_rule(value: Any) -> Any:
@@ -464,6 +482,40 @@ class SourceSpec(BaseModel):
         return f"{self.id}@{self.version}"
 
 
+@dataclass(slots=True)
+class InstalledSource:
+    """一份已安装的书源：定义本身 + 安装状态。
+
+    为什么要单独一个类型：:class:`SourceSpec` 是书源作者写的东西，
+    只包含规范里定义的字段。而「装没装、启没启用、上次体检什么结果、
+    从哪个版本升上来的」这些是 MoGrab 自己的记账，不该混进书源定义里 ——
+    否则导出书源时会把本机状态也带出去。
+
+    存储层返回这个类型，调度器用 ``.spec`` 取定义即可。
+    """
+
+    spec: SourceSpec
+    enabled: bool = True
+    health: HealthStatus = HealthStatus.UNKNOWN
+    installed_version: str = ""
+    """当前安装的版本，用于回滚（§56）。"""
+    previous_version: str | None = None
+    installed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def id(self) -> str:
+        return self.spec.id
+
+    @property
+    def is_usable(self) -> bool:
+        """启用且未失效。调度器挑书源时用这个判断。"""
+        return self.enabled and self.health not in (
+            HealthStatus.BROKEN,
+            HealthStatus.UNSUPPORTED,
+        )
+
+
 __all__ = [
     "SPEC_VERSION",
     "BookSpec",
@@ -471,6 +523,7 @@ __all__ = [
     "CleanSpec",
     "ContentSpec",
     "ExtractRule",
+    "InstalledSource",
     "NetworkPolicy",
     "Permissions",
     "RequestSpec",

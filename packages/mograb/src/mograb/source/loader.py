@@ -67,6 +67,33 @@ def load_source_file(path: str | Path) -> SourceSpec:
     return load_source_dict(raw, origin=str(file_path))
 
 
+def dump_source_yaml(spec: SourceSpec) -> str:
+    """把书源序列化回 YAML。
+
+    用于把书源落到磁盘（``<sources_dir>/<id>/source.yaml``）。
+    输出是可读、可手改的形态：``ExtractRule`` 还原成 ``a@href`` 这样的字符串，
+    值为 None 的可选字段直接省略。
+
+    Note:
+        不保证与原文件逐字节一致 —— 注释和字段顺序会丢。
+        这里的目标是「人能看懂、能继续改」，不是无损往返。
+    """
+    data = spec.model_dump(mode="json", exclude_none=True, by_alias=True)
+    return yaml.safe_dump(
+        data,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+        width=100,
+    )
+
+
+def write_source_file(spec: SourceSpec, path: Path) -> None:
+    """把书源写到指定路径，父目录不存在会自动创建。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dump_source_yaml(spec), encoding="utf-8")
+
+
 def _format_errors(exc: ValidationError) -> list[dict[str, Any]]:
     """把 pydantic 错误整理为「字段路径 + 原因」，便于 CLI 展示。"""
     formatted: list[dict[str, Any]] = []
@@ -82,4 +109,9 @@ def _format_errors(exc: ValidationError) -> list[dict[str, Any]]:
     return formatted
 
 
-__all__ = ["load_source_dict", "load_source_file"]
+__all__ = [
+    "dump_source_yaml",
+    "load_source_dict",
+    "load_source_file",
+    "write_source_file",
+]

@@ -28,7 +28,10 @@ from .sqlite import (
     Database,
     SqliteBookRepository,
     SqliteChapterRepository,
+    SqliteExportRepository,
+    SqliteHttpCache,
     SqliteSettingsRepository,
+    SqliteSourceRepository,
     SqliteTaskRepository,
 )
 
@@ -48,7 +51,10 @@ __all__ = [
     "SourceRow",
     "SqliteBookRepository",
     "SqliteChapterRepository",
+    "SqliteExportRepository",
+    "SqliteHttpCache",
     "SqliteSettingsRepository",
+    "SqliteSourceRepository",
     "SqliteTaskRepository",
     "TaskItemRow",
     "TaskRepository",

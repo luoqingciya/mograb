@@ -29,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -205,17 +206,23 @@ class HttpCacheRow(Base):
     """HTTP 缓存条目（规划书 §16）。"""
 
     __tablename__ = "http_cache"
-    __table_args__ = (Index("ix_http_cache_expires", "expires_at"),)
+    __table_args__ = (
+        Index("ix_http_cache_expires", "expires_at"),
+        # 容量淘汰按「最久未访问」删，所以要能在 accessed_at 上排序
+        Index("ix_http_cache_accessed", "accessed_at"),
+    )
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     source_id: Mapped[str] = mapped_column(String(64), index=True)
     url: Mapped[str] = mapped_column(String(2048))
     status_code: Mapped[int] = mapped_column(Integer)
     encoding: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    content: Mapped[bytes] = mapped_column(Text)  # 存 base64 或原始 bytes
+    content: Mapped[bytes] = mapped_column(LargeBinary)
 
     created_at: Mapped[str] = mapped_column(String(32))
     expires_at: Mapped[str] = mapped_column(String(32))
+    accessed_at: Mapped[str] = mapped_column(String(32))
+    """最近一次命中的时间，容量淘汰时按它排序（近似 LRU）。"""
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
 
 

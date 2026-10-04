@@ -219,12 +219,14 @@ settings     （键值）
 | `url` | TEXT | NOT NULL | |
 | `status_code` | INT | NOT NULL | |
 | `encoding` | TEXT | | |
-| `content` | BLOB/TEXT | NOT NULL | 响应体 |
+| `content` | BLOB | NOT NULL | 响应体原始字节，不做文本化 |
 | `created_at` | TEXT | NOT NULL | |
 | `expires_at` | TEXT | NOT NULL | TTL 到期时间 |
+| `accessed_at` | TEXT | NOT NULL, INDEX | 最近命中时间，容量淘汰按它排序 |
 | `size_bytes` | INT | NOT NULL | |
 
-**索引**：`INDEX(expires_at)` —— 便于批量清理过期条目
+**索引**：`INDEX(expires_at)` 用于批量清理过期条目；`INDEX(accessed_at)`
+用于容量淘汰时排序。
 
 **缓存键**（BLAKE2b-128 十六进制）由以下要素派生：
 
@@ -277,17 +279,63 @@ class BookRepository(Protocol):
 
 | 协议 | 实现 | 说明 |
 |------|------|------|
-| `SourceRepository` | 待实现 | 书源安装 / 启停 / 卸载 |
+| `SourceRepository` | `SqliteSourceRepository` | 书源安装 / 启停 / 卸载，见 §4.3 |
 | `BookRepository` | `SqliteBookRepository` | |
 | `ChapterRepository` | `SqliteChapterRepository` | |
 | `TaskRepository` | `SqliteTaskRepository` | 与 `mograb.task.manager.TaskRepository` 一致 |
-| `ExportRepository` | 待实现 | |
+| `ExportRepository` | `SqliteExportRepository` | 导出作业状态 |
 | `SettingsRepository` | `SqliteSettingsRepository` | |
+| `HttpCache`（网络层协议） | `SqliteHttpCache` | 三层失效，见 §4.4 |
 
 ### 4.2 所有方法均为 async
 
 即使 SQLite 是同步的——由实现层用 aiosqlite 桥接，
 保证接口不因后端而变。
+
+### 4.3 书源仓储：磁盘 + 数据库
+
+`SqliteSourceRepository` 是这个项目里唯一同时碰文件系统和数据库的仓储，
+因为它持久化的不是一行数据，而是整个「已安装书源」聚合。分工是：
+
+- **`<sources_dir>/<id>/source.yaml` 是定义的唯一真相。** 用户可以自己往里
+  丢文件，换机器直接拷目录。
+- **数据库那张表只记本机状态**：装没装、启没启用、体检结果、从哪个版本升上来的。
+  这些不属于书源定义，导出书源时也不该带出去。
+
+由此推出几条行为：
+
+| 情况 | 处理 |
+|------|------|
+| 索引里有、文件没了 | 当没装处理，`get()` 返回 None，`list_all()` 跳过 |
+| 文件坏了（YAML 不合法） | 跳过这一份，其余照常。单个坏书源不该拖垮整个列表 |
+| 想重建索引 | `rescan()`：扫目录、逐份加载、写入索引，并删掉文件已消失的行 |
+| `rescan()` 遇到已有行 | 只更新定义相关字段，`enabled` 和 `health` 保留 |
+
+最后一条是有意的：用户手动关掉的开关，不该被一次扫描重置回打开。
+
+`delete()` 会校验 ID 格式（`SOURCE_ID_RE`）再动文件系统，避免路径穿越。
+
+### 4.4 HTTP 缓存的三层失效
+
+`SqliteHttpCache` 把规划书 §16 要求的「必须提供失效策略」落成三层：
+
+| 层级 | 机制 | 触发点 |
+|------|------|--------|
+| TTL | 条目自带 `expires_at` | `get()` 读到过期条目顺手删；`purge_expired()` 批量清 |
+| 显式 | `invalidate_url` / `invalidate_source` / `clear` | 对应 `mog cache` 系列命令 |
+| 容量 | `max_size_bytes` 满了按最久未访问淘汰 | `put()` 之后自动检查 |
+
+关于容量淘汰的实现取舍：
+
+- **近似 LRU**。严格 LRU 要在每次读取时回写 `accessed_at`，等于把缓存命中
+  变成一次写库。这里按小时粒度更新（`ACCESS_REFRESH_INTERVAL`），
+  排序精度够用，又不会让读操作频繁触发写入。
+- **淘汰是一次批量删除**。先查出全部 `(key, size)` 按访问时间升序累减，
+  再一条 `DELETE ... IN (...)`。比循环「查一条删一条」少很多次往返。
+- `max_size_bytes=0` 表示不限容量，测试和临时场景用。
+
+`content` 用 `LargeBinary` 存原始字节，不做文本化 —— 正文可能是 GBK 编码的
+字节流，当文本存会坏。
 
 ---
 
