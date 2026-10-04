@@ -229,6 +229,51 @@ class TestTasksApi:
         assert response.status_code in {201, 409}
 
 
+class TestTaskCreateValidation:
+    """建任务时就把引用的实体查清楚。
+
+    ``tasks.book_id`` 上有外键，不存在的 id 会让插入抛 IntegrityError，
+    未处理的话就是 500。这里要的是 404。
+    """
+
+    def test_unknown_book_gives_404(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API_PREFIX}/tasks", json={"type": "export_book", "book_id": "book_nope"}
+        )
+        assert response.status_code == 404
+        assert response.json()["code"] == "STORAGE_NOT_FOUND"
+
+    def test_download_with_unknown_book_gives_404(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API_PREFIX}/tasks", json={"type": "download_book", "book_id": "book_nope"}
+        )
+        assert response.status_code == 404
+
+    def test_download_with_unknown_source_gives_404(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API_PREFIX}/tasks",
+            json={
+                "type": "download_book",
+                "source_id": "not-installed",
+                "url": "https://example.com/book/1001",
+            },
+        )
+        assert response.status_code == 404
+        assert response.json()["code"] == "SOURCE_NOT_FOUND"
+
+    def test_download_without_target_gives_400(self, client: TestClient) -> None:
+        """既没有 book_id 也没有 url，是请求本身不成立。"""
+        response = client.post(
+            f"{API_PREFIX}/tasks", json={"type": "download_book", "source_id": "example"}
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "TASK_PARAMETER_ERROR"
+
+    def test_nothing_persisted_on_rejection(self, client: TestClient) -> None:
+        client.post(f"{API_PREFIX}/tasks", json={"type": "export_book", "book_id": "book_nope"})
+        assert client.get(f"{API_PREFIX}/tasks").json() == []
+
+
 class TestExportsApi:
     def test_create_for_missing_book(self, client: TestClient) -> None:
         response = client.post(f"{API_PREFIX}/exports", json={"book_id": "nope"})

@@ -407,6 +407,7 @@ MoGrabError                       code: MOGRAB_ERROR
 ├── ContentValidationError        CONTENT_VALIDATION_ERROR 不自动重试
 ├── TaskError                     TASK_ERROR
 │   ├── TaskNotFoundError         TASK_NOT_FOUND
+│   ├── TaskParameterError        TASK_PARAMETER_ERROR      建任务参数不成立
 │   ├── InvalidTaskTransitionError TASK_INVALID_TRANSITION
 │   └── TaskCancelledError        TASK_CANCELLED
 ├── StorageError                  STORAGE_ERROR
@@ -415,7 +416,7 @@ MoGrabError                       code: MOGRAB_ERROR
     └── UnsafePathError           EXPORT_UNSAFE_PATH
 ```
 
-### 7.1 `retryable` 属性
+### 8.1 `retryable` 属性
 
 每个错误类携带 `retryable: bool`，由 `RetryPolicy` 直接读取。
 **避免在重试策略中散落 `isinstance` 判断**—— 这是刻意加的补充，原始规划书没提。

@@ -34,6 +34,7 @@ from mograb.errors import (
     SourceNotFoundError,
     SourceSchemaError,
     TaskNotFoundError,
+    TaskParameterError,
 )
 
 console = Console()
@@ -58,6 +59,9 @@ def exit_code_for(error: BaseException) -> int:
         return ExitCode.NOT_FOUND
     if isinstance(error, (SourceSchemaError, ContentValidationError)):
         return ExitCode.VALIDATION
+    if isinstance(error, TaskParameterError):
+        # 参数不成立 —— 和 Typer 自己报缺参数是同一类问题
+        return ExitCode.USAGE
     if isinstance(error, NetworkError):
         return ExitCode.NETWORK
     return ExitCode.ERROR

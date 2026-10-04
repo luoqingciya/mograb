@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -35,43 +34,12 @@ pytestmark = pytest.mark.integration
 BOOK_URL = "https://example.com/book/1001"
 
 
-class FixtureFetcher:
-    """按 URL 返回 fixture HTML，不发真实请求。
-
-    匹配有优先级：``/chapter/`` 要排在 ``/book/1001`` 前面，
-    否则章节页会被书的详情页抢走。
-    """
-
-    def __init__(self, fixtures_dir: Path) -> None:
-        self._dir = fixtures_dir
-        self.calls: list[str] = []
-
-    async def fetch(self, method: str, url: str, **kwargs: Any) -> Any:
-        self.calls.append(url)
-
-        if "/chapter/" in url:
-            name = "chapter.html"
-        elif url.endswith("/search"):
-            name = "search.html"
-        elif "/book/" in url:
-            name = "book.html"
-        else:
-            raise AssertionError(f"没为这个 URL 准备 fixture: {url}")
-
-        return _Response((self._dir / name).read_bytes(), url)
-
-
-class _Response:
-    def __init__(self, content: bytes, url: str) -> None:
-        self.content = content
-        self.encoding = "utf-8"
-        self.status_code = 200
-        self.url = url
-
-
 @pytest.fixture
-async def wired(tmp_path: Path, example_source_dir: Path):
-    """把一整套真实组件接起来。"""
+async def wired(tmp_path: Path, example_source_dir: Path, fixture_fetcher):
+    """把一整套真实组件接起来。
+
+    抓取器是共用的离线实现（见 tests/conftest.py），只有网络那一层被替换。
+    """
     database = Database(tmp_path / "mograb.db")
     await database.init_schema()
 
@@ -85,16 +53,15 @@ async def wired(tmp_path: Path, example_source_dir: Path):
     spec = load_source_file(example_source_dir / "source.yaml")
     await sources.save(spec)
 
-    fetcher = FixtureFetcher(example_source_dir / "fixtures")
     scheduler = DownloadScheduler(
-        engine=SourceEngine(fetcher),
+        engine=SourceEngine(fixture_fetcher),
         sources=sources,
         books=books,
         chapters=chapters,
         pipeline=ContentPipeline(),
     )
 
-    yield scheduler, sources, books, chapters, fetcher, tmp_path
+    yield scheduler, sources, books, chapters, fixture_fetcher, tmp_path
     await database.dispose()
 
 

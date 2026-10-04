@@ -203,6 +203,16 @@ class TaskNotFoundError(TaskError):
     code = "TASK_NOT_FOUND"
 
 
+class TaskParameterError(TaskError):
+    """建任务的参数不成立 —— 缺必填项，或者给法互相矛盾。
+
+    和 :class:`InvalidTaskTransitionError` 分开是因为语义不同：
+    那是「和资源当前状态冲突」（409），这是「请求本身就没说清楚」（400）。
+    """
+
+    code = "TASK_PARAMETER_ERROR"
+
+
 class InvalidTaskTransitionError(TaskError):
     """尝试了状态机不允许的状态转移。"""
 

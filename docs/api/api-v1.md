@@ -239,14 +239,44 @@ POST /api/v1/books/{book_id}/update?dry_run=true
 POST /api/v1/tasks
 ```
 
+下载任务有两种给法。
+
+书已经在库里（`mog download <book-id>` 或书架里点下载）：
+
 ```json
 {
   "type": "download_book",
   "book_id": "book_xxx",
-  "priority": 50,
-  "concurrency": 4
+  "priority": 50
 }
 ```
+
+只有一个详情页 URL（从搜索结果直接点下载，桌面端走这条）：
+
+```json
+{
+  "type": "download_book",
+  "source_id": "example",
+  "url": "https://example.com/book/1001"
+}
+```
+
+第二种会先按 `(source_id, source_book_id)` 登记成书再下，
+所以同一本书重复提交不会产生两条记录。任务完成后 `book_id` 会填上。
+
+其余类型：`update_book` 与 `export_book` 要 `book_id`；
+`refresh_source` 两者都不用。任务专属参数放 `params`，比如导出任务的
+`format` / `target`。
+
+建任务时就会把引用的实体查清楚，不留到 worker 执行时才失败 ——
+否则调用方拿到 `201` 却无从判断这个任务能不能跑：
+
+| 情况 | 状态码 | 错误码 |
+|------|--------|--------|
+| `book_id` 指向的书不存在 | 404 | `STORAGE_NOT_FOUND` |
+| `source_id` 指向的书源不存在 | 404 | `SOURCE_NOT_FOUND` |
+| 下载任务既没 `book_id` 也没 `source_id` + `url` | 400 | `TASK_PARAMETER_ERROR` |
+| `export_book` 没给 `book_id` | 400 | `TASK_PARAMETER_ERROR` |
 
 响应 `201`：
 
@@ -389,9 +419,13 @@ GET /api/v1/exports/{export_id}
 | `ExportError` | 422 | 导出失败（含路径非法） |
 | `HttpStatusError` | 502 | 上游站点返回错误 |
 | `NetworkError` | 502 | 网络层失败 |
+| `TaskParameterError` | 400 | 建任务的参数不成立（缺必填项） |
 | `TaskError` | 409 | 状态转移冲突 |
 | `StorageError` | 500 | 持久化失败 |
 | 其他 | 500 | |
+
+匹配按从上到下的顺序取第一个命中的类型，所以子类要排在父类前面
+（`TaskParameterError` 在 `TaskError` 之前）。
 
 `details` 字段始终存在（可能为空对象），便于客户端稳定解析。
 

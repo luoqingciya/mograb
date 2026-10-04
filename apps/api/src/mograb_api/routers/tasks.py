@@ -19,11 +19,17 @@ TaskTypeLiteral = Literal["download_book", "update_book", "export_book", "refres
 
 
 class TaskCreate(BaseModel):
-    """创建任务请求。"""
+    """创建任务请求。
+
+    下载任务有两种给法：给 ``book_id``（书已在库里），
+    或者给 ``source_id`` + ``url``（只有一个详情页 URL，先登记成书再下）。
+    后者是桌面端从搜索结果直接点下载的路径。
+    """
 
     type: TaskTypeLiteral
     book_id: str | None = None
     source_id: str | None = None
+    url: str | None = Field(default=None, description="书籍详情页 URL，配合 source_id 使用")
     priority: int = Field(default=0, ge=0, le=100)
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -72,13 +78,21 @@ def _to_out(task) -> TaskOut:
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=TaskOut, summary="创建任务")
 async def create_task(payload: TaskCreate, application: ApplicationDep) -> TaskOut:
-    """创建任务并入队，由 worker 池执行。"""
-    task = await application.task_manager.create(
+    """创建任务并入队，由 worker 池执行。
+
+    引用的书或书源不存在时返回 404，而不是等到 worker 执行时才失败 ——
+    任务已经排进队列了才发现下不了，调用方拿着 201 无从判断。
+    """
+    params = dict(payload.params)
+    if payload.url:
+        params["url"] = payload.url
+
+    task = await application.create_task(
         TaskType(payload.type),
         book_id=payload.book_id,
         source_id=payload.source_id,
         priority=payload.priority,
-        params=payload.params,
+        params=params,
     )
     return _to_out(task)
 

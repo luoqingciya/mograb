@@ -31,7 +31,7 @@ from .domain.enums import ExportStatus, TaskType
 from .domain.export import ExportRecord
 from .domain.ids import new_id
 from .domain.task import Task
-from .errors import EntityNotFoundError, TaskError
+from .errors import EntityNotFoundError, SourceNotFoundError, TaskError, TaskParameterError
 from .export import get_exporter
 from .export.base import render_filename
 from .logging.setup import configure_logging, get_logger
@@ -100,6 +100,69 @@ class Application:
     # ------------------------------------------------------------------
     # 任务
     # ------------------------------------------------------------------
+    async def create_task(
+        self,
+        task_type: TaskType,
+        *,
+        book_id: str | None = None,
+        source_id: str | None = None,
+        priority: int = 0,
+        params: dict[str, Any] | None = None,
+        enqueue: bool = True,
+    ) -> Task:
+        """建任务，先确认它引用的书和书源确实在。
+
+        ``tasks.book_id`` 上有外键，不存在的 id 会在插入时被 SQLite 挡下 ——
+        但抛出来的是裸的 ``IntegrityError``，API 那边就成了 500。
+        这里先查一遍，换成带实体名的领域错误（404）。
+
+        CLI 和 API 都从这儿建任务，判据只有一份。
+        """
+        await self._require_task_target(
+            task_type, book_id=book_id, source_id=source_id, params=params
+        )
+        return await self.task_manager.create(
+            task_type,
+            book_id=book_id,
+            source_id=source_id,
+            priority=priority,
+            params=params,
+            enqueue=enqueue,
+        )
+
+    async def _require_task_target(
+        self,
+        task_type: TaskType,
+        *,
+        book_id: str | None,
+        source_id: str | None,
+        params: dict[str, Any] | None,
+    ) -> None:
+        """校验任务引用的实体。缺什么当场报什么，别拖到执行时才炸。"""
+        if task_type is TaskType.REFRESH_SOURCE:
+            return
+
+        if task_type is TaskType.EXPORT_BOOK:
+            if not book_id:
+                raise TaskParameterError("导出任务缺少 book_id")
+            await self._require_book(book_id)
+            return
+
+        # download_book / update_book：给 book_id，或者给 source_id + url
+        if book_id:
+            await self._require_book(book_id)
+            return
+
+        url = (params or {}).get("url")
+        if not url or not source_id:
+            raise TaskParameterError("下载任务需要 book_id，或者 source_id + params.url")
+        if await self.sources.get(source_id) is None:
+            raise SourceNotFoundError(f"书源不存在: {source_id}", details={"source_id": source_id})
+
+    async def _require_book(self, book_id: str) -> None:
+        if await self.books.get(book_id) is None:
+            raise EntityNotFoundError(f"书籍不存在: {book_id}", details={"book_id": book_id})
+
     def task_handlers(self) -> dict[str, TaskHandler]:
         """任务类型到处理函数的映射。
 
@@ -133,7 +196,7 @@ class Application:
         """
         self._progress_hook = on_progress
         try:
-            task = await self.task_manager.create(
+            task = await self.create_task(
                 task_type,
                 book_id=book_id,
                 source_id=source_id,
@@ -148,15 +211,40 @@ class Application:
     async def _save_task(self, task: Task) -> None:
         await self.tasks.save(task)
 
+    async def _resolve_download_target(self, task: Task) -> str:
+        """定出这次下载要下哪本书。
+
+        两种给法：
+
+        - ``book_id``：书已经在库里（CLI 的 ``mog download <id>``）
+        - ``source_id`` + ``params["url"]``：只给了一个详情页 URL
+          （桌面端从搜索结果直接点下载）。这种先登记成书再下。
+
+        第二种不能省 —— 搜索结果里拿到的是 URL，没有 book_id。
+        """
+        if task.book_id:
+            return task.book_id
+
+        url = task.params.get("url")
+        if not url or not task.source_id:
+            raise TaskParameterError(
+                "下载任务需要 book_id，或者 source_id + params.url",
+                details={"task_id": task.id},
+            )
+
+        book = await self.scheduler.ensure_book(task.source_id, str(url))
+        # 记回任务上，前端刷新后能看到最终下的是哪本书
+        task.book_id = book.id
+        return book.id
+
     # ------------------------------------------------------------------
     # 处理函数
     # ------------------------------------------------------------------
     async def _handle_download(self, task: Task) -> None:
-        if not task.book_id:
-            raise TaskError("下载任务缺少 book_id", details={"task_id": task.id})
+        book_id = await self._resolve_download_target(task)
 
         report = await self.scheduler.run(
-            task.book_id,
+            book_id,
             on_progress=self._progress_hook or self._progress(task),
         )
 
@@ -177,7 +265,7 @@ class Application:
 
     async def _handle_export(self, task: Task) -> None:
         if not task.book_id:
-            raise TaskError("导出任务缺少 book_id", details={"task_id": task.id})
+            raise TaskParameterError("导出任务缺少 book_id", details={"task_id": task.id})
 
         book = await self.books.get(task.book_id)
         if book is None:

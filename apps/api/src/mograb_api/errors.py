@@ -30,9 +30,12 @@ from mograb.errors import (
     StorageError,
     TaskError,
     TaskNotFoundError,
+    TaskParameterError,
 )
 
 # 错误类型 -> HTTP 状态码
+# 顺序有意义：先匹配到子类。TaskParameterError 必须排在 TaskError 前面，
+# 否则会被后者拦成 409。
 _STATUS_MAP: tuple[tuple[type[MoGrabError], int], ...] = (
     (EntityNotFoundError, 404),
     (SourceNotFoundError, 404),
@@ -41,6 +44,7 @@ _STATUS_MAP: tuple[tuple[type[MoGrabError], int], ...] = (
     (SourceUnsupportedError, 422),
     (ContentValidationError, 422),
     (ExportError, 422),
+    (TaskParameterError, 400),
     (HttpStatusError, 502),
     (NetworkError, 502),
     (StorageError, 500),

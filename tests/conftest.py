@@ -91,3 +91,51 @@ def sample_chapters(now: datetime, sample_book: Book) -> list[Chapter]:
         )
         for i in range(1, 4)
     ]
+
+
+class FixtureResponse:
+    """``FixtureFetcher`` 返回的假响应，字段够引擎用。"""
+
+    def __init__(self, content: bytes, url: str) -> None:
+        self.content = content
+        self.encoding = "utf-8"
+        self.status_code = 200
+        self.url = url
+
+
+class FixtureFetcher:
+    """按 URL 返回 fixture HTML，不发真实请求。
+
+    匹配有优先级：``/chapter/`` 要排在 ``/book/1001`` 前面，
+    否则章节页会被书的详情页抢走。
+
+    引擎只要求 fetcher 有 ``fetch(method, url, **kwargs)``，
+    所以这个类能直接顶替 :class:`~mograb.network.HttpClient`。
+    """
+
+    def __init__(self, fixtures_dir: Path) -> None:
+        self._dir = fixtures_dir
+        self.calls: list[str] = []
+
+    async def fetch(self, method: str, url: str, **kwargs: object) -> FixtureResponse:
+        self.calls.append(url)
+
+        if "/chapter/" in url:
+            name = "chapter.html"
+        elif url.endswith("/search"):
+            name = "search.html"
+        elif "/book/" in url:
+            name = "book.html"
+        else:
+            raise AssertionError(f"没为这个 URL 准备 fixture: {url}")
+
+        return FixtureResponse((self._dir / name).read_bytes(), url)
+
+    async def aclose(self) -> None:
+        """占位，让它能顶替 HttpClient 传给 create_application 之外的场景。"""
+
+
+@pytest.fixture
+def fixture_fetcher(example_fixtures_dir: Path) -> FixtureFetcher:
+    """离线抓取器，替换掉真实 HTTP 客户端。"""
+    return FixtureFetcher(example_fixtures_dir)

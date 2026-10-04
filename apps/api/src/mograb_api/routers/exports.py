@@ -82,7 +82,7 @@ async def create_export(payload: ExportCreate, application: ApplicationDep) -> E
     )
     await application.exports.save(record)
 
-    await application.task_manager.create(
+    await application.create_task(
         TaskType.EXPORT_BOOK,
         book_id=book.id,
         params={
