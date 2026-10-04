@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# MoGrab Source Specification v1 —— 参考示例
+#
+# 这是官方示例书源，用于演示 DSL 全貌与 fixture 测试。
+# 域名 example.com 由 IANA 保留，不会产生真实流量。
+#
+# 注意字段语义（规划书 §7/§13/§53 的 version 冲突已修正）：
+#   spec_version —— Source Specification 版本（整数，当前恒为 1）
+#   version      —— 书源自身的语义化版本
+
+spec_version: 1
+
+id: example
+name: Example
+version: 1.0.0
+homepage: https://example.com
+description: 官方参考书源，演示 MoGrab Source DSL v1 的全部能力。
+license: GPL-3.0-only
+authors:
+  - MoGrab Contributors
+
+engine_min_version: 0.1.0
+
+capabilities:
+  - search
+  - book
+  - chapters
+  - content
+
+# 网络策略：按书源隔离限速（规划书 §15）
+network:
+  concurrency: 2
+  request_interval_ms: 500
+  timeout_ms: 15000
+  retry: 3
+  headers:
+    User-Agent: "{{user_agent}}"
+
+# 权限声明（规划书 §41）：v1 仅允许 network
+permissions:
+  network:
+    - example.com
+  cookies: false
+  filesystem: false
+  script: false
+
+# ---------------------------------------------------------------------------
+# 搜索
+# ---------------------------------------------------------------------------
+search:
+  request:
+    method: GET
+    url: https://example.com/search
+    query:
+      q: "{{keyword}}"
+      page: "{{page}}"
+  response:
+    format: html
+  result:
+    list: ".book-item"
+    fields:
+      title: ".title"
+      author: ".author"
+      url: "a@href"
+      cover: "img@src"
+  transform:
+    - trim
+    - normalize_whitespace
+    - url_join
+
+# ---------------------------------------------------------------------------
+# 书籍详情
+# ---------------------------------------------------------------------------
+book:
+  request:
+    method: GET
+    url: "{{book.url}}"
+  fields:
+    id: "#book-id"
+    title: "h1.book-title"
+    author: ".book-author"
+    intro: ".book-intro"
+    cover: ".book-cover img@src"
+    latest_chapter: ".latest-chapter"
+  transform:
+    - trim
+    - normalize_whitespace
+    - url_join   # 仅对 cover 等 URL 字段生效（条件化，见 transformer.py）
+
+# ---------------------------------------------------------------------------
+# 章节目录
+# ---------------------------------------------------------------------------
+chapters:
+  request:
+    method: GET
+    url: "{{book.url}}"
+  result:
+    list: "#chapter-list li a"
+    fields:
+      title: "@text"
+      url: "@href"
+      id: "@data-chapter-id"
+    reverse: false
+  transform:
+    - trim
+    - url_join
+
+# ---------------------------------------------------------------------------
+# 正文
+# ---------------------------------------------------------------------------
+content:
+  request:
+    method: GET
+    url: "{{chapter.url}}"
+  body:
+    selector: "#content"
+  clean:
+    remove:
+      - "script"
+      - "style"
+      - ".advert"
+      - ".chapter-nav"
+  transform:
+    - trim
+    - remove_html
+    - normalize_whitespace
+
+# ---------------------------------------------------------------------------
+# 全局变换（作用于所有能力的提取结果）
+# ---------------------------------------------------------------------------
+transforms:
+  - trim

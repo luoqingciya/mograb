@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- Fixture: 章节正文页。含需要被 clean 规则移除的噪声节点。 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>第一章 科学边界 - 三体</title>
+    <style>.advert { display: block; }</style>
+  </head>
+  <body>
+    <div class="advert">本站域名已更换，请记住新地址 www.example.com</div>
+
+    <div id="content">
+      <p>汪淼觉得自己像一条被拎出水的鱼。</p>
+      <p>他坐在办公桌前，面前摊着一份《三体》的游戏光盘。</p>
+      <p>电话铃响了。</p>
+      <script>console.log('should be removed');</script>
+      <p>他拿起听筒，听见史强的声音："汪教授，我是史强。"</p>
+    </div>
+
+    <div class="chapter-nav">
+      <a href="/book/1001/chapter/2">下一章</a>
+    </div>
+    <div class="advert">请记住本站：www.example.com</div>
+  </body>
+</html>

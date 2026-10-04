@@ -1,0 +1,200 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# MoGrab CI —— 对应规划书 §48。
+#
+# 阶段：lint → type-check → unit-test → integration-test → source-test
+# 矩阵：Python 3.11/3.12 × Windows/Linux
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  UV_FROZEN: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint + 格式
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      - name: Ruff check
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  # ---------------------------------------------------------------------------
+  # 版本号来源
+  # ---------------------------------------------------------------------------
+  version:
+    name: Version source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      # 校验 VERSION 符合 PEP 440，三个包都用 dynamic version 指向同一个文件，
+      # 且源码里没有第二处硬编码的 __version__
+      - name: Check version source
+        run: uv run python scripts/version.py check
+
+      - name: Show version
+        run: uv run python scripts/version.py show
+
+  # ---------------------------------------------------------------------------
+  # 类型检查
+  # ---------------------------------------------------------------------------
+  type-check:
+    name: Type check (pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      - name: Pyright
+        run: uv run pyright
+
+  # ---------------------------------------------------------------------------
+  # 测试（矩阵）
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (py${{ matrix.python }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      # 单元 + 集成 + 书源 fixture（全部离线；network 标记默认跳过）
+      - name: Run tests
+        run: uv run pytest -m "not network" --cov --cov-report=xml --cov-report=term
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 书源校验（独立 job，便于快速定位书源问题）
+  # ---------------------------------------------------------------------------
+  source-lint:
+    name: Source lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      - name: Lint all official sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          failed=0
+          for f in sources/**/source.yaml; do
+            echo "::group::lint $f"
+            if ! uv run mog source lint "$f"; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  # ---------------------------------------------------------------------------
+  # 构建产物校验（确保包可安装）
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build wheels
+        run: uv build --all-packages --out-dir dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

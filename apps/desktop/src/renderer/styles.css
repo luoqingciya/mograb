@@ -1,0 +1,60 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+:root {
+  --bg: #1b1d23;
+  --panel: #23262e;
+  --border: #333846;
+  --text: #e6e8ee;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app { display: flex; height: 100vh; }
+
+.sidebar {
+  width: 180px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 600;
+  padding: 8px 12px 16px;
+  color: var(--accent);
+}
+
+.nav-item {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.nav-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.nav-item.active { background: rgba(79, 140, 255, 0.15); color: var(--accent); }
+
+.content { flex: 1; padding: 28px 32px; overflow-y: auto; }
+
+.page { display: none; }
+.page.active { display: block; }
+
+h1 { font-size: 22px; margin-bottom: 12px; }
+.hint { color: var(--muted); font-size: 14px; }

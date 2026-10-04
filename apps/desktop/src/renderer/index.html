@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- CSP：禁止远程脚本，仅允许本地 API 连接 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src http://127.0.0.1:48721; style-src 'self' 'unsafe-inline'"
+    />
+    <title>MoGrab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- 布局见规划书 §33：左侧导航 + 右侧内容 -->
+    <div class="app">
+      <nav class="sidebar">
+        <div class="brand">MoGrab</div>
+        <button class="nav-item active" data-page="search">搜索</button>
+        <button class="nav-item" data-page="shelf">书架</button>
+        <button class="nav-item" data-page="tasks">下载</button>
+        <button class="nav-item" data-page="sources">书源</button>
+        <button class="nav-item" data-page="settings">设置</button>
+      </nav>
+      <main class="content">
+        <section id="page-search" class="page active">
+          <h1>搜索</h1>
+          <p class="hint">输入关键词，跨书源搜索小说。</p>
+        </section>
+        <section id="page-shelf" class="page"><h1>书架</h1></section>
+        <section id="page-tasks" class="page"><h1>下载任务</h1></section>
+        <section id="page-sources" class="page"><h1>书源管理</h1></section>
+        <section id="page-settings" class="page"><h1>设置</h1></section>
+      </main>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

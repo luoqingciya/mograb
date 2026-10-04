@@ -1,0 +1,30 @@
+{
+  "name": "mograb-desktop",
+  "version": "0.1.0",
+  "description": "MoGrab Desktop (Electron) — Windows only",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "echo \"TODO: electron-builder 打包\" && exit 0",
+    "lint": "echo \"TODO: eslint\" && exit 0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "build": {
+    "appId": "org.mograb.desktop",
+    "productName": "MoGrab",
+    "win": {
+      "target": ["zip", "nsis"],
+      "artifactName": "MoGrab-${version}-win-x64.${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "../../../release-artifacts/backend",
+        "to": "backend"
+      }
+    ]
+  }
+}

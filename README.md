@@ -1,0 +1,174 @@
+# MoGrab
+
+开源的小说抓取与电子书整理工具。Python 写的，后端 + 命令行 + Windows 桌面端。
+
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+
+## 这个项目想解决什么
+
+现有的小说下载工具大多围绕 Legado 书源格式做兼容，结果是书源规则越写越复杂，
+一个站点改版就要靠一堆正则和脚本去救。MoGrab 换个思路：不兼容 Legado，
+自己定一套书源规范，规则只描述"请求什么、从哪取、怎么提取、怎么转换"，
+重试、并发、缓存、调度全部交给程序。
+
+书源是一份 YAML 配置，不是 Python 插件，不允许执行任意代码。表达力换来的是
+可静态检查、可安全分发、可以离线测试。
+
+```yaml
+spec_version: 1
+id: example
+version: 1.0.0
+capabilities: [search, book, chapters, content]
+
+search:
+  request: { method: GET, url: "https://example.com/search", query: { q: "{{keyword}}" } }
+  result:
+    list: ".book-item"
+    fields:
+      title: ".title"
+      author: ".author"
+      url: "a@href"
+
+content:
+  request: { method: GET, url: "{{chapter.url}}" }
+  body: { selector: "#content" }
+  clean:
+    remove: ["script", "style", ".advert"]
+```
+
+## 现在做到哪了
+
+版本 `0.1.0.dev0`，还是骨架阶段。规范已经定下来，核心模块写完并且有测试，
+但端到端链路还没接完 —— 存储的仓储层、CLI 和 API 的业务逻辑都还是空壳。
+
+| 部分 | 状态 |
+|------|------|
+| Source Specification v1 / Domain Model v1 | 已冻结 |
+| 领域模型、书源加载与校验、提取器、变换、网络层、内容管线、导出 | 已实现，有测试 |
+| 任务引擎、存储、API、CLI | 骨架就位，业务未接线 |
+| 桌面端 | 占位 |
+
+质量基线：176 个测试通过，Ruff 无告警，Pyright 0 错误。
+
+## 上手
+
+需要 Python 3.11+ 和 [uv](https://github.com/astral-sh/uv)。
+最终用户不用装这些，发布包自带运行时。
+
+```bash
+git clone https://github.com/luoqingciya/mograb.git
+cd mograb
+uv sync --all-packages
+
+# 校验一个书源
+uv run mog source lint sources/official/example/source.yaml
+
+# 跑测试
+uv run pytest -q
+```
+
+`mog source lint` 的输出：
+
+```
+Source: example
+Schema: PASS
+Semantic: PASS
+
+Result: READY
+```
+
+## 数据放在哪
+
+便携式的，所有运行数据都在程序目录下的 `data/` 里，不写系统目录。
+删掉 `data/` 就等于恢复出厂设置，整个程序目录可以直接拷走。
+
+```
+<程序目录>/
+├── mog.exe
+├── _internal/
+└── data/
+    ├── config.toml
+    ├── mograb.db
+    ├── cache/
+    ├── covers/
+    ├── logs/
+    ├── exports/
+    └── sources/
+```
+
+开发时从仓库根运行，数据落在 `<仓库根>/data/`，已经在 `.gitignore` 里排除。
+
+想改位置就设 `MOGRAB_HOME`。
+
+## 结构
+
+```
+MoGrab/
+├── packages/mograb/     核心库
+│   └── src/mograb/
+│       ├── domain/      领域模型
+│       ├── source/      书源加载、校验、执行
+│       ├── network/     HTTP、缓存、限流、重试
+│       ├── task/        队列、Worker、调度
+│       ├── storage/     ORM、仓储、SQLite
+│       ├── content/     清洗、规范化、校验
+│       ├── export/      TXT / Markdown / EPUB
+│       ├── config/      配置与路径
+│       └── logging/     结构化日志
+├── apps/
+│   ├── cli/             命令行，命令名 mog
+│   ├── api/             本地 API，FastAPI
+│   └── desktop/         桌面端，Electron
+├── sources/             官方与社区书源
+├── tests/               单元 / 集成 / 书源 fixture
+└── docs/                文档
+```
+
+架构上就一条硬规则：CLI 和桌面端都不许自己实现业务逻辑，一切走 Core 或 API。
+其他的边界写在[架构总览](docs/architecture/overview.md)里。
+
+版本号只有一个来源，仓库根的 [`VERSION`](VERSION) 文件。三个包构建时都读它，
+改一处全局生效。
+
+## 文档
+
+- [架构总览](docs/architecture/overview.md) —— 分层、边界、数据流、技术选型
+- [Source Specification v1](docs/source-spec/source-spec-v1.md) —— 书源规范，最重要的一份
+- [Domain Model v1](docs/domain-model/domain-model-v1.md) —— 领域模型与任务状态机
+- [Storage v1](docs/storage/storage-v1.md) —— 表结构
+- [API v1](docs/api/api-v1.md) —— 接口契约
+- [开发指南](docs/development/getting-started.md) —— 环境、命令、提交规范
+- [CI 与发布](docs/development/ci.md) —— 流水线与打包
+- [规划评估报告](docs/evaluation/规划评估报告.md) —— 对原始规划书的评估，以及几个关键裁决的理由
+- [ADR](docs/architecture/decisions/) —— 架构决策记录
+
+## 不做什么
+
+MoGrab 是个人工具，不是通用爬虫框架。以下明确不做：
+
+- 兼容 Legado 全部规则
+- 执行任意第三方脚本
+- 复杂反爬对抗、验证码破解
+- 绕过付费墙或访问控制
+- 多用户服务器、移动端、分布式爬虫
+
+## 使用须知
+
+仅供个人学习研究，抓取公开可访问的内容。
+
+使用者需要自己遵守目标站点的服务条款、robots.txt 和所在地法律。
+不要用于商业用途、批量分发版权内容，也不要给站点造成不合理负载 ——
+程序默认单源并发 2、请求间隔 500ms，别改得比这更激进。
+
+项目本身不提供、不内置任何版权内容。书源只描述如何访问公开页面，
+不含内容数据。
+
+按 GPL-3.0 分发，不提供任何担保。
+
+## 许可证
+
+[GNU General Public License v3.0](LICENSE)，`GPL-3.0-only`。
+
+第三方依赖的许可证清单在 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)，
+里面也说明了为什么这个项目刻意避开 AGPL 依赖。

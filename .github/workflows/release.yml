@@ -1,0 +1,249 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# MoGrab Release —— 对应规划书 §57.6、§57.7。
+#
+# 触发：推送 v* tag
+# 流程：Checkout → Setup → uv sync --locked → Lint → Type Check → Test
+#       → Build CLI (PyInstaller onedir) → Build Desktop Backend
+#       → Build Electron → ZIP → NSIS → SHA256SUMS.txt → GitHub Release
+#
+# 说明：CLI 采用 PyInstaller **onedir**（非单文件），见 §57.2。
+#       最终产物不含 uv / Python / Node.js（§57.1）。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不含 v 前缀），例如 0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 发布前质量门禁
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages
+
+      # tag 名必须和 VERSION 文件一致，否则产物名和包内版本会对不上
+      - name: Check tag matches VERSION
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(uv run python scripts/version.py show)"
+          echo "tag  = $tag_version"
+          echo "VERSION = $file_version"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::tag ($tag_version) 与 VERSION 文件 ($file_version) 不一致"
+            echo "先把 VERSION 改成 $tag_version 并提交，再重新打 tag"
+            exit 1
+          fi
+
+      - name: Check version source
+        run: uv run python scripts/version.py check
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run pyright
+
+      - name: Test
+        run: uv run pytest -m "not network"
+
+  # ---------------------------------------------------------------------------
+  # Windows CLI（PyInstaller onedir → ZIP）
+  # ---------------------------------------------------------------------------
+  build-cli-windows:
+    name: Build CLI (Windows x64)
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages --group build
+
+      - name: Build CLI (PyInstaller onedir)
+        shell: bash
+        run: uv run python scripts/build.py cli --version "${GITHUB_REF_NAME#v}"
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $name = "MoGrab-CLI-v$version-win-x64"
+          Compress-Archive -Path "release-artifacts/MoGrab-CLI/*" -DestinationPath "$name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows
+          path: MoGrab-CLI-*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Windows Desktop（后端 sidecar + Electron → ZIP + NSIS）
+  # ---------------------------------------------------------------------------
+  build-desktop-windows:
+    name: Build Desktop (Windows x64)
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: uv sync --locked --all-packages --group build
+
+      - name: Build Desktop backend (sidecar)
+        shell: bash
+        run: uv run python scripts/build.py backend --version "${GITHUB_REF_NAME#v}"
+
+      - name: Install Electron dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build Electron app (ZIP + NSIS)
+        working-directory: apps/desktop
+        run: npx electron-builder --win --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Linux CLI（tar.gz）
+  # ---------------------------------------------------------------------------
+  build-cli-linux:
+    name: Build CLI (Linux x64)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-packages --group build
+
+      - name: Build CLI (PyInstaller onedir)
+        run: uv run python scripts/build.py cli --version "${GITHUB_REF_NAME#v}"
+
+      - name: Create tar.gz
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tar -czf "MoGrab-CLI-v${version}-linux-x64.tar.gz" -C release-artifacts MoGrab-CLI
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux
+          path: MoGrab-CLI-*.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 汇总产物 + 生成校验和 + 创建 Release
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    needs: [build-cli-windows, build-desktop-windows, build-cli-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # 提取 CHANGELOG 中对应版本段落（## [x.y.z] 到下一个 ## 之间）
+          awk -v ver="$version" '
+            $0 ~ "^## \\[?" ver "\\]?" {flag=1; next}
+            flag && /^## / {exit}
+            flag {print}
+          ' CHANGELOG.md > release-notes.md || true
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${version}" > release-notes.md
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            artifacts/*.zip
+            artifacts/*.tar.gz
+            artifacts/*.exe
+            artifacts/SHA256SUMS.txt
+          draft: true
+          generate_release_notes: false

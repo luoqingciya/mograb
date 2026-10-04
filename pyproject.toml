@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# MoGrab 工作区根配置（uv workspace 根，不产生可安装产物）。
+#
+# 职责边界：
+#   - 本文件只负责「工作区编排」与「全局工具配置」。
+#   - 各成员包（packages/*、apps/*）各自持有独立 pyproject.toml 与依赖声明。
+#
+# 详见 docs/architecture/overview.md 与 docs/development/workspace.md
+
+[project]
+name = "mograb-workspace"
+version = "0.0.0"
+description = "MoGrab monorepo workspace root (non-installable)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "MoGrab Contributors" }]
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "packages/*",
+    "apps/cli",
+    "apps/api",
+]
+
+# ---------------------------------------------------------------------------
+# 开发依赖（仅开发/CI 使用，不进发布产物 —— 见规划书 §57.1）
+# ---------------------------------------------------------------------------
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "ruff>=0.9",
+    "pyright>=1.1.380",
+    "pre-commit>=3.7",
+    "faker>=25.0",
+    "freezegun>=1.5",
+    "packaging>=24.0",
+    "types-pyyaml>=6.0",
+]
+# 打包依赖：仅在 CI 的 Release 流程中使用（规划书 §57.2、§57.3）
+build = [
+    "pyinstaller>=6.6",
+]
+
+# ---------------------------------------------------------------------------
+# 依赖源（中央索引 + 备用索引）
+# ---------------------------------------------------------------------------
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+# ---------------------------------------------------------------------------
+# Ruff：lint + format 统一入口
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["packages/mograb/src", "apps/cli/src", "apps/api/src", "tests"]
+exclude = [".venv", "build", "dist", "node_modules", "apps/desktop"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+    "ASYNC", # flake8-async
+]
+ignore = [
+    "E501",   # 行宽由 formatter 处理
+    "SIM108", # 允许显式 if/else 以保持可读性
+    # 本项目文档字符串与注释使用中文全角标点，属于刻意用法
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # 包内部使用相对导入是既定风格（层级深，绝对导入冗长）
+    "TID252",
+    # 异步函数中的少量阻塞文件操作（导出写盘）已用 to_thread 包裹，
+    # 其余 mkdir/stat 属可忽略的短操作
+    "ASYNC240",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mograb", "mograb_cli", "mograb_api"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "TID252"]
+# Typer / FastAPI 要求 CLI 参数与路由签名默认值必须是 typer.Option(...) / Query(...) 调用
+"apps/cli/**" = ["B008"]
+"apps/api/**" = ["B008"]
+# 盲捕获在 Worker / 网络层是有意为之（需统一分类后再抛）
+"packages/mograb/src/mograb/task/worker.py" = ["BLE001"]
+"packages/mograb/src/mograb/network/client.py" = ["BLE001"]
+# TimeoutError_ 刻意使用下划线以避免与内建 TimeoutError 混淆
+"packages/mograb/src/mograb/errors.py" = ["N801", "A001"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Pyright：类型检查
+# ---------------------------------------------------------------------------
+[tool.pyright]
+include = ["packages/mograb/src", "apps/cli/src", "apps/api/src"]
+exclude = [".venv", "build", "dist", "apps/desktop"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+venvPath = "."
+venv = ".venv"
+
+# ---------------------------------------------------------------------------
+# pytest：统一测试配置
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "unit: 单元测试",
+    "integration: 集成测试",
+    "source: 书源 fixture 测试",
+    "e2e: 端到端测试",
+    "network: 需要真实网络（默认跳过）",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["packages/mograb/src", "apps/cli/src", "apps/api/src"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 70

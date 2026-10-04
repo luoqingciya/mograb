@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-3.0-only
+"""API 错误模型与异常映射（规划书 §37）。
+
+把领域层的 :class:`MoGrabError` 层次映射为稳定的 HTTP 响应：
+
+.. code-block:: json
+
+    {
+      "code": "SOURCE_PARSE_FAILED",
+      "message": "...",
+      "details": {}
+    }
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from mograb.errors import (
+    ContentValidationError,
+    EntityNotFoundError,
+    ExportError,
+    HttpStatusError,
+    MoGrabError,
+    NetworkError,
+    SourceNotFoundError,
+    SourceSchemaError,
+    SourceUnsupportedError,
+    StorageError,
+    TaskError,
+    TaskNotFoundError,
+)
+
+# 错误类型 -> HTTP 状态码
+_STATUS_MAP: tuple[tuple[type[MoGrabError], int], ...] = (
+    (EntityNotFoundError, 404),
+    (SourceNotFoundError, 404),
+    (TaskNotFoundError, 404),
+    (SourceSchemaError, 422),
+    (SourceUnsupportedError, 422),
+    (ContentValidationError, 422),
+    (ExportError, 422),
+    (HttpStatusError, 502),
+    (NetworkError, 502),
+    (StorageError, 500),
+    (TaskError, 409),
+)
+
+
+def status_for(error: MoGrabError) -> int:
+    """把领域错误映射为 HTTP 状态码。"""
+    for error_type, status in _STATUS_MAP:
+        if isinstance(error, error_type):
+            return status
+    return 500
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """注册全局异常处理器。"""
+
+    @app.exception_handler(MoGrabError)
+    async def _handle_mograb_error(_request: Request, exc: MoGrabError) -> JSONResponse:
+        return JSONResponse(status_code=status_for(exc), content=exc.to_dict())
+
+    @app.exception_handler(ValueError)
+    async def _handle_value_error(_request: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "INVALID_ARGUMENT",
+                "message": str(exc),
+                "details": {},
+            },
+        )
+
+
+__all__ = ["register_exception_handlers", "status_for"]

@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# mograb-cli —— MoGrab 命令行界面
+#
+# 职责边界（规划书 §31、§61）：CLI 只做「命令行交互」，
+# 业务逻辑一律通过 API / Core 完成，不得自行实现下载或解析。
+
+[project]
+name = "mograb-cli"
+dynamic = ["version"]
+description = "MoGrab command-line interface (mog)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "MoGrab Contributors" }]
+
+dependencies = [
+    "mograb",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[tool.uv.sources]
+mograb = { workspace = true }
+
+[project.scripts]
+mog = "mograb_cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/luoqingciya/mograb"
+Repository = "https://github.com/luoqingciya/mograb"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 版本号唯一来源：仓库根目录的 VERSION 文件（与 mograb / mograb-api 共用）
+[tool.hatch.version]
+source = "regex"
+path = "../../VERSION"
+pattern = "^(?P<version>\\S+)$"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mograb_cli"]

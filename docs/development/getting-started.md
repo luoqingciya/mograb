@@ -1,0 +1,284 @@
+# 开发指南
+
+> 对应规划书：§46、§47、§48、§49
+
+---
+
+## 1. 环境准备
+
+### 1.1 前置要求
+
+| 工具 | 版本 | 说明 |
+|------|------|------|
+| Python | ≥ 3.11 | 使用 `StrEnum`、`datetime.UTC` 等特性 |
+| uv | ≥ 0.5 | 依赖与虚拟环境管理 |
+| Node.js | ≥ 20 | **仅** Desktop 开发需要 |
+
+> 最终用户**无需**安装 Python、uv 或 Node.js（见 §57.1）。
+> 上述工具仅属于开发与构建链路。
+
+### 1.2 初始化
+
+```bash
+git clone https://github.com/luoqingciya/mograb.git
+cd mograb
+
+uv sync --all-packages          # 安装核心库 + CLI + API + 开发依赖
+
+uv run pre-commit install       # 安装 Git 钩子
+```
+
+### 1.3 验证环境
+
+```bash
+uv run mog --version            # mog (MoGrab) 0.1.0.dev0
+uv run pytest -q                # 176 passed
+uv run ruff check .             # All checks passed!
+uv run pyright                  # 0 errors
+```
+
+---
+
+## 2. 工作区结构
+
+采用 **uv workspace**（见 [ADR-0001](../architecture/decisions/ADR-0001-monorepo-layout.md)）。
+
+```
+pyproject.toml                 工作区根（package = false，不可安装）
+├── packages/mograb            核心库
+├── apps/cli                   命令行（mog）
+└── apps/api                   本地 API（mograb-api）
+```
+
+### 2.1 依赖管理
+
+| 位置 | 内容 |
+|------|------|
+| `pyproject.toml`（根） | 工作区成员声明 + `[dependency-groups] dev` + 全局工具配置 |
+| `packages/mograb/pyproject.toml` | 核心库运行时依赖 |
+| `apps/*/pyproject.toml` | 应用依赖（通过 `[tool.uv.sources]` 引用工作区内的 `mograb`） |
+
+**添加依赖**：
+
+```bash
+uv add --package mograb httpx          # 加到核心库
+uv add --package mograb-cli rich       # 加到 CLI
+uv add --group dev pytest-benchmark    # 加到开发依赖组
+```
+
+### 2.2 `uv.lock` 提交策略
+
+`uv.lock` **必须提交**。CI 使用 `uv sync --locked`，要求 lock 与
+`pyproject.toml` 完全一致。
+
+何时需要更新 lock：
+
+| 场景 | 是否需更新 |
+|------|-----------|
+| 修改任何 `pyproject.toml` 的依赖 | 必须（`uv sync` 会自动更新） |
+| 仅修改代码 | 不需要 |
+| 想升级依赖版本 | 显式执行 `uv lock --upgrade-package <name>` |
+
+> CI 会因 lock 不一致而失败。提交前请确认 `uv lock --check` 通过。
+
+### 2.3 版本号
+
+版本号只有一个来源：仓库根的 `VERSION` 文件。三个包的 `pyproject.toml` 都用
+`dynamic = ["version"]`，构建时通过 hatchling 的 regex source 读这个文件。
+运行时从包元数据读（`mograb._version`），所以源码里没有第二份版本号。
+
+```bash
+uv run python scripts/version.py show           # 看当前版本
+uv run python scripts/version.py check          # 校验格式和来源唯一性
+uv run python scripts/version.py set 0.2.0.dev0 # 改版本
+```
+
+`set` 会把输入规范化成 PEP 440 的标准写法（比如 `0.1.0.DEV0` 会变成
+`0.1.0.dev0`）。
+
+别在源码里写 `__version__ = "..."`，`scripts/version.py check` 会报错，
+`tests/unit/test_version.py` 也会失败。
+
+---
+
+## 3. 常用命令
+
+```bash
+# 测试
+uv run pytest                                  # 全部
+uv run pytest tests/unit -q                    # 仅单元测试
+uv run pytest -m "not network"                 # 排除需网络的测试
+uv run pytest --cov --cov-report=term-missing  # 覆盖率
+
+# 代码质量
+uv run ruff check . --fix                      # lint + 自动修复
+uv run ruff format .                           # 格式化
+uv run pyright                                 # 类型检查
+
+# CLI
+uv run mog --help
+uv run mog source lint sources/official/example/source.yaml
+uv run mog config path
+
+# API
+uv run mograb-api                              # 启动（127.0.0.1:48721）
+uv run python -c "from mograb_api.main import create_app; print(len(create_app().openapi()['paths']))"
+```
+
+---
+
+## 4. 测试策略
+
+> 规划书 §47 要求四层测试。
+
+| 层 | 目录 | 标记 | 说明 |
+|----|------|------|------|
+| Unit | `tests/unit/` | `@pytest.mark.unit` | 纯函数与模型：Source Schema、Extractor、Transformer、Content Cleaner、Chapter Identity、Task 状态机、文件名模板 |
+| Integration | `tests/integration/` | `@pytest.mark.integration` | 跨层协作：API 应用、Storage ↔ Domain |
+| Fixture | `tests/source/` | `@pytest.mark.source` | 真实 HTML 快照 → 书源规则 → 期望结果（**完全离线**） |
+| E2E | `tests/e2e/` | `@pytest.mark.e2e` | CLI → API → Task → DB → Export（待补） |
+
+### 4.1 离线优先
+
+测试默认离线。需要真实网络的测试必须标 `@pytest.mark.network`，CI 里默认跳过。
+
+书源测试用 `sources/*/fixtures/*.html` 快照。站点改版后先用 fixture 复现问题，
+再改规则（规划书 §12）。
+
+### 4.2 数据目录隔离
+
+`tests/conftest.py` 里有个 autouse fixture，会把 `MOGRAB_HOME` 指到临时目录。
+不加这个的话，任何调用 `Paths.ensure()` 的测试（比如 API 冒烟测试触发 lifespan）
+都会在仓库根建出 `data/` 来。
+
+要测默认解析行为的用例可以自己 `monkeypatch.delenv("MOGRAB_HOME")` 覆盖掉，
+`tests/unit/test_paths.py` 就是这么做的。
+
+### 4.3 覆盖率门槛
+
+`fail_under = 70`。新增功能要带测试；纯骨架代码（只有 `NotImplementedError`
+的那些）不算。
+
+---
+
+## 5. 代码规范
+
+> 规划书 §49 要求：type hints、public API 的 docstring、小函数、依赖倒置。
+
+### 5.1 强制项
+
+| 项 | 要求 |
+|----|------|
+| 类型标注 | 所有公开函数必须有完整标注 |
+| Docstring | 所有 public API 必须有；说明「为什么」而非仅「做什么」 |
+| 文件头 | `# SPDX-License-Identifier: GPL-3.0-only` |
+| 行宽 | 100 |
+| 导入 | 由 Ruff 的 isort 规则管理 |
+
+### 5.2 领域层额外约束
+
+`mograb.domain` **只允许**导入 pydantic 与标准库。禁止导入 httpx / sqlalchemy /
+fastapi 等基础设施库。这是架构边界的核心（见架构总览 §3.2）。
+
+### 5.3 pre-commit 钩子
+
+| 钩子 | 作用 |
+|------|------|
+| `trailing-whitespace` / `end-of-file-fixer` | 文件卫生 |
+| `check-yaml` / `check-toml` / `check-json` | 配置文件语法 |
+| `check-added-large-files` | 阻止 >1MB 文件入库 |
+| `detect-private-key` | 阻止密钥泄漏 |
+| `ruff` / `ruff-format` | lint + 格式化 |
+| `pyright` | 类型检查（仅核心包） |
+| `source-lint` | 校验改动的书源 YAML |
+
+---
+
+## 6. Git 分支策略
+
+> 规划书 §46。**不搞过于复杂的 Git Flow。**
+
+```
+main         稳定版本，只接受来自 develop 的合并
+develop      PR 的默认目标分支
+feature/*    新功能
+fix/*        缺陷修复
+release/*    发布准备
+```
+
+### 6.1 提交信息
+
+采用 [Conventional Commits](https://www.conventionalcommits.org/)：
+
+```
+<type>(<scope>): <subject>
+
+类型：feat | fix | docs | style | refactor | perf | test | build | ci | chore
+范围：core | source | network | task | storage | content | export | cli | api | desktop | docs
+```
+
+示例：
+
+```
+feat(source): 支持 JSONPath 提取规则
+fix(network): 修正 GBK 站点编码探测
+docs(spec): 冻结 Source Specification v1
+```
+
+### 6.2 版本与发布
+
+```
+v0.1.0  Core Prototype
+v0.2.0  Task System
+v0.3.0  Source Ecosystem
+v0.4.0  API
+v0.5.0  CLI
+v0.6.0  Desktop
+v0.7.0  EPUB / Polish
+v1.0.0  规范稳定
+```
+
+---
+
+## 7. 贡献流程
+
+1. Fork 并从 `develop` 创建 `feature/*` 分支
+2. 实现功能 + 补充测试
+3. 本地通过全部检查：
+   ```bash
+   uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
+   ```
+4. 提交 PR 到 `develop`，说明动机、方案与测试情况
+5. 涉及架构决策的改动，需同时提交 ADR
+
+### 7.1 书源贡献
+
+书源存放在独立仓库 `MoGrab-Sources`（规划书 §45），
+但官方书源位于本仓库的 `sources/official/`。
+
+新增书源必须包含：
+
+```
+sources/official/<id>/
+├── source.yaml
+├── README.md
+└── fixtures/
+    ├── search.html
+    ├── book.html
+    └── chapter.html
+```
+
+并附带 `tests/source/test_<id>_source.py`。
+
+---
+
+## 8. 参考文档
+
+| 文档 | 内容 |
+|------|------|
+| [架构总览](../architecture/overview.md) | 分层、边界、数据流 |
+| [Source Specification v1](../source-spec/source-spec-v1.md) | 书源规范 |
+| [Domain Model v1](../domain-model/domain-model-v1.md) | 领域模型 |
+| [Storage v1](../storage/storage-v1.md) | 表结构 |
+| [API v1](../api/api-v1.md) | 接口契约 |
+| [CI](ci.md) | 持续集成 |
