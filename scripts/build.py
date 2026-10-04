@@ -145,17 +145,43 @@ def build(target: str, version: str) -> Path:
 
     subprocess.run(args, check=True, cwd=REPO_ROOT)
 
-    # PyInstaller 会在 distpath 下再套一层以 --name 命名的目录，
-    # 这里拍平一层，让 mog.exe 直接落在 out_dir 下，
-    # 打包出来的 ZIP 里顶层就是 MoGrab-CLI/，不会多一层 mog/。
-    nested = out_dir / str(cfg["name"])
-    if nested.is_dir():
-        for item in nested.iterdir():
-            shutil.move(str(item), str(out_dir / item.name))
-        nested.rmdir()
+    flatten_dist(out_dir, str(cfg["name"]))
 
     print(f"[build] 完成: {out_dir}")
     return out_dir
+
+
+def flatten_dist(out_dir: Path, name: str) -> None:
+    """把 PyInstaller 多套的那层目录拍平。
+
+    PyInstaller 的 onedir 产物固定是 ``<distpath>/<name>/...``，
+    拍平之后可执行文件直接落在 ``out_dir`` 下，打包出来的 ZIP 里顶层就是
+    ``MoGrab-CLI/``，不会多一层 ``mog/``。
+
+    注意 Linux：可执行文件名和目录名都叫 ``mog``，逐个搬的话第一个就撞上自己
+    （目标路径正是 nested 本身）。所以先把整层挪到临时目录再搬。
+    """
+    nested = out_dir / name
+    if not nested.is_dir():
+        return
+
+    staging = out_dir / "_staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    nested.rename(staging)
+
+    try:
+        for item in staging.iterdir():
+            target = out_dir / item.name
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(item), str(target))
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
 
 
 def clean() -> None:
