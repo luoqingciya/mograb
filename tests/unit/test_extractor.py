@@ -21,6 +21,26 @@ HTML = """
 </body></html>
 """
 
+# JSON API 的典型信封：{code, msg, data:{page, size, list, count}}
+JSON_PAYLOAD = {
+    "code": 200,
+    "msg": "成功",
+    "data": {
+        "page": 1,
+        "count": 32245,
+        "list": [
+            {"id": 52027, "title": "苍蓝星", "author": "Dr莫比乌斯", "imgUrl": "https://cdn/x.jpg"},
+            {"id": 49972, "title": "剑来", "author": "烽火戏诸侯", "imgUrl": "https://cdn/y.jpg"},
+        ],
+    },
+}
+
+JSON_FIELDS = {
+    "title": "jsonpath:$.title",
+    "author": "jsonpath:$.author",
+    "url": "jsonpath:$.imgUrl",
+}
+
 
 @pytest.fixture
 def doc() -> Document:
@@ -74,6 +94,76 @@ class TestListExtraction:
             {"nope": ExtractRule.parse(".not-exist")},
         )
         assert all(r["nope"] is None for r in rows)
+
+
+class TestJsonListExtraction:
+    """JSON 响应的列表提取。
+
+    以前这里是坏的：``extract_many`` 写死了 ``tree.cssselect``，JSONPath 传进去
+    直接抛 ``SelectorSyntaxError``。于是 ``format: json`` 只有单值能用
+    （``extract_one`` 走 JSONPath 提取器是好的），**列表型能力
+    （``search`` / ``chapters``）完全做不了** —— 任何 JSON API 书源都卡在这。
+    """
+
+    @pytest.fixture
+    def json_doc(self) -> Document:
+        import json
+
+        return Document(
+            raw=json.dumps(JSON_PAYLOAD, ensure_ascii=False).encode("utf-8"),
+            encoding="utf-8",
+            kind="json",
+        )
+
+    def _rows(self, doc: Document, list_expr: str) -> list[dict[str, str | None]]:
+        return extract_many(
+            doc,
+            ExtractRule.parse(list_expr),
+            {k: ExtractRule.parse(v) for k, v in JSON_FIELDS.items()},
+        )
+
+    def test_星号写法(self, json_doc: Document) -> None:
+        rows = self._rows(json_doc, "jsonpath:$.data.list[*]")
+
+        assert [r["title"] for r in rows] == ["苍蓝星", "剑来"]
+        assert rows[0]["author"] == "Dr莫比乌斯"
+        assert rows[0]["url"] == "https://cdn/x.jpg"
+
+    def test_不带星号也能取列表(self, json_doc: Document) -> None:
+        """匹配到数组时按元素展开 —— `$.data.list` 更贴近「取列表」的直觉。"""
+        rows = self._rows(json_doc, "jsonpath:$.data.list")
+
+        assert [r["title"] for r in rows] == ["苍蓝星", "剑来"]
+
+    def test_字段规则作用于列表项内部(self, json_doc: Document) -> None:
+        """下钻语义：``$.title`` 取的是「该项的 title」，不是整份文档的。"""
+        rows = self._rows(json_doc, "jsonpath:$.data.list[*]")
+
+        assert rows[1]["title"] == "剑来"
+
+    def test_未命中的字段是_None(self, json_doc: Document) -> None:
+        rows = extract_many(
+            json_doc,
+            ExtractRule.parse("jsonpath:$.data.list[*]"),
+            {"nope": ExtractRule.parse("jsonpath:$.not_there")},
+        )
+        assert [r["nope"] for r in rows] == [None, None]
+
+    def test_空列表返回空(self) -> None:
+        import json
+
+        doc = Document(
+            raw=json.dumps({"data": {"list": []}}).encode("utf-8"),
+            encoding="utf-8",
+            kind="json",
+        )
+        assert self._rows(doc, "jsonpath:$.data.list[*]") == []
+
+    def test_中文不被转义(self, json_doc: Document) -> None:
+        """下钻时重新序列化要保证中文可读，否则字段值会变成 \\uXXXX。"""
+        rows = self._rows(json_doc, "jsonpath:$.data.list[*]")
+
+        assert "\\u" not in str(rows[0]["title"])
 
 
 class TestOtherRuleTypes:

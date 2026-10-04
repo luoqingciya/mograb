@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -31,7 +32,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ..domain.book import Book
-from ..domain.chapter import Chapter
+from ..domain.chapter import Chapter, ChapterSearchHit
 from ..domain.enums import (
     BookStatus,
     ExportFormat,
@@ -232,6 +233,51 @@ class SqliteChapterRepository:
             # AsyncSession.execute 的静态返回类型为 Result（不含 rowcount）；
             # DELETE 实际返回 CursorResult，故用 getattr 安全读取。
             return int(getattr(result, "rowcount", 0) or 0)
+
+    async def search_content(
+        self,
+        keyword: str,
+        *,
+        book_id: str | None = None,
+        limit: int = 50,
+    ) -> list[ChapterSearchHit]:
+        """在已下载的章节正文里搜关键词。
+
+        用 ``LIKE`` 做**字面子串**匹配。关键词里的 ``%`` 和 ``_`` 会被转义，
+        所以搜「100%」不会退化成通配符。
+
+        已知限制：``LIKE '%kw%'`` 用不上索引，是全表扫描。个人书库规模下
+        够用（几十兆正文约百毫秒级）；库再大就该上 FTS5 虚拟表，
+        那需要动 schema，属于另一件事。指定 ``book_id`` 能把扫描范围缩到一本书。
+        """
+        if not keyword:
+            return []
+
+        pattern = f"%{_escape_like(keyword)}%"
+        async with self._db.session() as session:
+            stmt = (
+                select(ChapterRow, BookRow.title)
+                .join(BookRow, BookRow.id == ChapterRow.book_id)
+                .where(ChapterRow.content.like(pattern, escape="\\"))
+                .order_by(ChapterRow.book_id, ChapterRow.index)
+                .limit(limit)
+            )
+            if book_id is not None:
+                stmt = stmt.where(ChapterRow.book_id == book_id)
+
+            rows = (await session.execute(stmt)).all()
+
+        return [
+            ChapterSearchHit(
+                book_id=chapter.book_id,
+                book_title=book_title,
+                chapter_id=chapter.id,
+                chapter_title=chapter.title,
+                chapter_index=chapter.index,
+                snippet=_make_snippet(chapter.content or "", keyword),
+            )
+            for chapter, book_title in rows
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +749,34 @@ class SqliteHttpCache:
 # ---------------------------------------------------------------------------
 # 映射辅助
 # ---------------------------------------------------------------------------
+# LIKE 里 `%` 和 `_` 是通配符，关键词里的这两个字符必须转义，
+# 否则搜「100%」会变成「100 开头且后面任意」，搜「a_b」会连「axb」一起命中。
+_LIKE_ESCAPE_RE = re.compile(r"([\\%_])")
+
+
+def _escape_like(value: str) -> str:
+    """转义 ``LIKE`` 的通配符（配合 ``escape="\\"`` 使用）。"""
+    return _LIKE_ESCAPE_RE.sub(r"\\\1", value)
+
+
+def _make_snippet(content: str, keyword: str, *, context: int = 30) -> str:
+    """截出命中位置附近的片段。
+
+    只返回片段而不是整章正文 —— 一本几千章的书，搜一次就把几十兆正文
+    全读进内存是不可接受的。
+    """
+    index = content.find(keyword)
+    if index < 0:
+        # 理论上不会发生（SQL 已经过滤过），但别让展示层崩在假设上
+        return content[: context * 2].strip()
+
+    start = max(0, index - context)
+    end = min(len(content), index + len(keyword) + context)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(content) else ""
+    return f"{prefix}{content[start:end].strip()}{suffix}"
+
+
 async def _upsert_book(session: AsyncSession, book: Book) -> None:
     """按主键写入或更新书籍（异步，当前会话内）。"""
     row = await session.get(BookRow, book.id)

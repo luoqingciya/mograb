@@ -220,6 +220,30 @@ result:
 **逐项下钻语义**：`fields` 中的规则作用于**列表项内部**，而非整个文档。
 因此 `a@href` 取的是「该项内的第一个 `<a>` 的 href」。
 
+#### `list` 支持 JSONPath
+
+`result.list` 与 `fields` 都按 §5.1 的统一语法解析，所以 JSON API 直接可用：
+
+```yaml
+search:
+  request:
+    url: https://api.example.com/search
+    query: {keyword: "{{keyword}}"}
+  response:
+    format: json
+  result:
+    list: "jsonpath:$.data.list[*]"
+    fields:
+      title: "jsonpath:$.title"
+      url: "jsonpath:$.id"
+```
+
+`list` 的 JSONPath 匹配到**数组**时会按元素展开，因此 `$.data.list` 和
+`$.data.list[*]` 两种写法等价 —— 前者更贴近「取列表」的直觉，后者更显式。
+
+下钻语义对 JSON 同样成立：`fields` 里的 `jsonpath:$.title` 取的是
+「该项的 title」，不是整份响应的。
+
 `reverse: true` 用于目录倒序的站点（最新章节在前），引擎会在提取后统一反转为顺序。
 **声明了 `paginate` 时，反转发生在所有页面抓完之后**，而不是逐页反转。
 

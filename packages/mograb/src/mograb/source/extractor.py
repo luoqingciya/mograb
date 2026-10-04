@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast, runtime_checkable
@@ -203,11 +204,27 @@ def extract_many(
 ) -> list[dict[str, str | None]]:
     """列表型提取：先定位列表项，再在每一项内提取字段。
 
-    实现方式为「逐项下钻」：对每个列表节点构造子树文档，再执行字段规则，
-    保证 ``@href`` 等相对规则作用于列表项本身而非整个文档。
+    按 ``list_rule`` 的类型分流：``jsonpath`` 走 JSON 路径，其余走 DOM。
+    **不能只按 ``document.kind`` 判断** —— 书源可能对 HTML 响应声明 JSONPath
+    （虽然少见），规则类型才是真正的意图。
 
     Returns:
         与列表项一一对应的字典列表；未命中的字段值为 ``None``。
+    """
+    if list_rule.type is RuleType.JSONPATH:
+        return _extract_many_json(document, list_rule, field_rules)
+    return _extract_many_dom(document, list_rule, field_rules)
+
+
+def _extract_many_dom(
+    document: Document,
+    list_rule: ExtractRule,
+    field_rules: dict[str, ExtractRule],
+) -> list[dict[str, str | None]]:
+    """DOM 型列表提取。
+
+    实现方式为「逐项下钻」：对每个列表节点构造子树文档，再执行字段规则，
+    保证 ``@href`` 等相对规则作用于列表项本身而非整个文档。
     """
     tree = document.tree
     nodes = tree.cssselect(list_rule.expression)
@@ -224,6 +241,41 @@ def extract_many(
         for name, rule in field_rules.items():
             row[name] = extract_one(sub, rule)
         rows.append(row)
+    return rows
+
+
+def _extract_many_json(
+    document: Document,
+    list_rule: ExtractRule,
+    field_rules: dict[str, ExtractRule],
+) -> list[dict[str, str | None]]:
+    """JSON 型列表提取。
+
+    与 DOM 版同样是「逐项下钻」：把每个列表项包成独立文档，字段规则在
+    该项内部求值，所以 ``jsonpath:$.title`` 取的是「该项的 title」。
+    """
+    from jsonpath_ng.ext import parse  # type: ignore[import-untyped]
+
+    items: list[Any] = []
+    for match in parse(list_rule.expression).find(document.data):
+        value = match.value
+        if value is None:
+            continue
+        # 匹配到数组时按元素展开，于是 `$.data.list` 和 `$.data.list[*]`
+        # 两种写法都成立 —— 前者更贴近「取列表」的直觉，后者更显式。
+        if isinstance(value, list):
+            items.extend(value)
+        else:
+            items.append(value)
+
+    rows: list[dict[str, str | None]] = []
+    for item in items:
+        sub = Document(
+            raw=json.dumps(item, ensure_ascii=False).encode("utf-8"),
+            encoding="utf-8",
+            kind="json",
+        )
+        rows.append({name: extract_one(sub, rule) for name, rule in field_rules.items()})
     return rows
 
 

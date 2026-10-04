@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from ..domain.book import Book
-from ..domain.chapter import Chapter
+from ..domain.chapter import Chapter, ChapterSearchHit
 from ..domain.enums import HealthStatus, TaskStatus
 from ..domain.export import ExportRecord
 from ..domain.source import InstalledSource, SourceSpec
@@ -93,6 +93,25 @@ class ChapterRepository(Protocol):
     async def save_many(self, chapters: list[Chapter]) -> None: ...
 
     async def delete_by_book(self, book_id: str) -> int: ...
+
+    async def search_content(
+        self,
+        keyword: str,
+        *,
+        book_id: str | None = None,
+        limit: int = 50,
+    ) -> list[ChapterSearchHit]:
+        """在已下载的章节正文里搜关键词（纯本地，不访问网络）。
+
+        Args:
+            keyword: 关键词，按**字面子串**匹配（不解析正则）。
+            book_id: 限定某一本书；为 None 时搜整个库。
+            limit: 返回条数上限。
+
+        只返回命中处的片段，不返回整章正文 —— 否则搜一次就要把整个库
+        的正文读进内存。
+        """
+        ...
 
 
 @runtime_checkable

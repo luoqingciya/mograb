@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -134,4 +135,23 @@ class Chapter(BaseModel):
         return changed
 
 
-__all__ = ["Chapter", "compute_content_hash", "normalize_url"]
+@dataclass(slots=True)
+class ChapterSearchHit:
+    """本地全文搜索的一条命中。
+
+    这是**查询结果**而不是实体，所以用 dataclass 而不是 pydantic 模型
+    （与 :class:`~mograb.source.engine.BookDraft` 同类）。
+
+    ``snippet`` 是命中位置附近的片段，**不是整章正文** —— 一本几千章的书
+    搜一次就把几十兆正文全读进内存是不可接受的。片段由仓储在查询时就地截好。
+    """
+
+    book_id: str
+    book_title: str
+    chapter_id: str
+    chapter_title: str
+    chapter_index: int
+    snippet: str
+
+
+__all__ = ["Chapter", "ChapterSearchHit", "compute_content_hash", "normalize_url"]

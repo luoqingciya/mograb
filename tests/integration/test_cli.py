@@ -10,6 +10,7 @@ autouse fixture 指到临时目录，不会碰到仓库或用户数据。
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -332,3 +333,88 @@ class TestTopLevel:
         assert result.exit_code == 0
         for name in ("source", "search", "download", "task", "cache", "config", "server"):
             assert name in result.stdout
+
+
+def _seed_chapter() -> None:
+    """往库里塞一本书 + 一章正文。
+
+    免得为了测搜索真跑一遍下载 —— ``mog find`` 要验的是查询，不是抓取。
+    """
+    from datetime import UTC, datetime
+
+    from mograb.app import create_application
+    from mograb.domain.book import Book
+    from mograb.domain.chapter import Chapter
+
+    async def go() -> None:
+        async with create_application() as app:
+            now = datetime(2026, 1, 1, tzinfo=UTC)
+            await app.books.save(
+                Book(
+                    id="book_t",
+                    source_id="example",
+                    source_book_id="1001",
+                    url="https://example.com/book/1001",
+                    title="三体",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await app.chapters.save(
+                Chapter(
+                    id="chap_t",
+                    book_id="book_t",
+                    title="第一章 科学边界",
+                    url="https://example.com/1",
+                    index=0,
+                    content="汪淼接到一个差事，要去看看鲜荔枝。",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    asyncio.run(go())
+
+
+class TestFindCommand:
+    """``mog find`` —— 在已下载的章节正文里搜。**纯本地，不访问网络。**"""
+
+    @pytest.fixture
+    def seeded(self, example_yaml: str) -> None:
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_chapter()
+
+    def test_空库时给人话(self) -> None:
+        result = run("find", "荔枝")
+
+        assert result.exit_code == 0
+        assert "没有匹配" in result.stdout
+
+    def test_命中并显示书名章节(self, seeded: None) -> None:
+        result = run("find", "荔枝")
+
+        assert result.exit_code == 0
+        assert "命中" in result.stdout
+        assert "三体" in result.stdout
+        assert "第一章 科学边界" in result.stdout
+
+    def test_未命中(self, seeded: None) -> None:
+        result = run("find", "这个词肯定不存在")
+
+        assert result.exit_code == 0
+        assert "没有匹配" in result.stdout
+
+    def test_json_输出(self, seeded: None) -> None:
+        data = json.loads(run("find", "荔枝", "--json").stdout)
+
+        assert data["keyword"] == "荔枝"
+        assert data["count"] == 1
+        assert data["hits"][0]["book_title"] == "三体"
+        assert "荔枝" in data["hits"][0]["snippet"]
+
+    def test_限定书籍(self, seeded: None) -> None:
+        assert json.loads(run("find", "荔枝", "--book", "book_t", "--json").stdout)["count"] == 1
+        assert json.loads(run("find", "荔枝", "--book", "nope", "--json").stdout)["count"] == 0
+
+    def test_缺关键词是参数错误(self) -> None:
+        assert run("find").exit_code != 0

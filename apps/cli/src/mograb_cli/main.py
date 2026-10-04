@@ -13,6 +13,7 @@
     mog cache    ...   缓存管理（stats/clear）
     mog config   ...   配置管理
     mog server   ...   本地 API Server 控制
+    mog find     ...   在已下载的书里搜正文（纯本地）
     mog logs     ...   日志查看
 
 通用约定：
@@ -33,6 +34,7 @@ from .commands import (
     config,
     download,
     export,
+    find,
     logs,
     search,
     server,
@@ -64,6 +66,7 @@ app.command("download", help="下载书籍")(download.download)
 app.command("update", help="增量更新书籍")(update.update)
 app.command("export", help="导出书籍")(export.export)
 app.command("logs", help="查看日志")(logs.logs)
+app.command("find", help="在已下载的书里搜正文")(find.find)
 
 
 def _version_callback(value: bool) -> None:

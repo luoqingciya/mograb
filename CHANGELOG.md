@@ -34,6 +34,32 @@ result:
 `max_pages`。**到达上限会记 WARNING** —— 不能静默截断。
 `reverse` 改为在所有页面抓完之后才应用。见规范 §5.4。
 
+### 新增
+
+**`mog find` —— 在已下载的章节正文里搜关键词。** 和 `mog search` 是两件事：
+
+- `mog search <关键词>` —— 去**书源**上搜书，找的是「哪本书」
+- `mog find <关键词>` —— 在**本地已下载的正文**里搜，找的是「哪一章」
+
+完全不访问网络，也不受任何站点 robots.txt 约束。`--book` 可限定某一本，
+`--json` 便于脚本调用。只返回命中处的**片段**而不是整章正文 ——
+一本几千章的书，搜一次就把几十兆正文读进内存是不可接受的。
+
+用 `LIKE` 做字面子串匹配，关键词里的 `%` 和 `_` 会转义
+（否则搜「100%」会退化成「100 开头且后面任意」）。已知限制：`LIKE '%kw%'`
+用不上索引，是全表扫描 —— 个人书库规模够用，库再大就该上 FTS5 虚拟表，
+那需要动 schema，属于另一件事。
+
+**JSON 响应支持列表提取。** `extract_many` 原先写死了 `tree.cssselect`，
+JSONPath 传进去直接抛 `SelectorSyntaxError`。于是 `format: json` 只有单值能用
+（`extract_one` 走 JSONPath 提取器是好的），**列表型能力（`search` / `chapters`）
+完全做不了** —— 任何 JSON API 书源都卡在这。测试也没覆盖到，
+`test_jsonpath` 只测了扁平单值。
+
+现在按**规则类型**分流（不是按 `document.kind`，书源可能对 HTML 响应声明
+JSONPath）。`list` 的 JSONPath 匹配到数组时按元素展开，所以 `$.data.list`
+和 `$.data.list[*]` 等价。
+
 ### 修复
 
 **`--format` 指定的格式不影响导出文件的扩展名。** `resolve_export_target`
@@ -110,11 +136,17 @@ result:
 无残留标签 / 无伪缩进。站点挂了 Cloudflare 但未拦截。
 
 端到端实跑过一本 7 章的书：下载 7/7 章、0 失败、76,725 字，
-TXT / Markdown / EPUB 三种导出都正常。
+TXT / Markdown / EPUB 三种导出都正常；`mog find 荔枝` 搜到 7 处。
 
-该站点 `robots.txt` 禁止 `/search*` 与 `/api*`，所以书源**不提供搜索能力**。
+该站点新增了 `search` 能力（走 `/api/query/search`）。**注意：该端点被站点
+robots.txt 的 `Disallow: /api*` 与 `Disallow: /search*` 两条同时命中**，
+使用它等于绕过站方表态，已由使用者决定并承担。不绕的替代方案
+（爬全部分类页建本地索引）是 1000+ 次请求，反而重得多。
 
-606 个测试，覆盖率 85%。
+搜索响应的**外层信封是推断的**（依据是首页 SSR 载荷里书籍列表接口的形状），
+尚未实测确认；条目内部的字段路径来自实际抓包。
+
+626 个测试，覆盖率 85%。
 
 ## [1.0.0rc0] - 2026-10-04
 

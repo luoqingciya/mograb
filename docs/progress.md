@@ -16,11 +16,11 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 606 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 627 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 6,200 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 6,500 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（7 个 job） | `gh run list` |
@@ -134,6 +134,16 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 所以 `url_join` 只能用「像不像 URL」来条件化（规范 §6.4 的折中）。
 原始规划书说 v1.1 会加字段级，目前还没做。状态字段的 `"1"`→`completed`
 映射也因此只能用「锚定整值的正则」绕（见规范 §5.5）。
+
+**本地全文搜索是 `LIKE` 全表扫描。** `mog find` 用 `LIKE '%kw%'`，
+用不上索引。个人书库规模够用（几十兆正文约百毫秒级），
+库再大就该上 FTS5 虚拟表 —— 那需要动 schema，而
+[storage-v1](storage/storage-v1.md) 是冻结的契约文档，得先改文档。
+
+**书源搜索的合规代价。** `bqgnovels` 的 search 走 `/api/query/search`，
+而该站点 robots.txt 的 `Disallow: /api*` 与 `Disallow: /search*` 两条都命中它。
+使用它等于绕过站方表态，已由使用者决定并承担。这不是技术限制，
+是每个书源各自要面对的取舍 —— 写新书源时应当先看 robots.txt。
 
 ### 低
 

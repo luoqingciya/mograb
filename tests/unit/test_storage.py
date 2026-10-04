@@ -364,3 +364,97 @@ class TestTransaction:
                 )
                 raise RuntimeError("模拟失败")
         assert await books.get("y") is None
+
+
+class TestChapterContentSearch:
+    """本地全文搜索（纯本地，不访问网络）。
+
+    用 ``LIKE`` 做字面子串匹配。**关键词里的 ``%`` 和 ``_`` 必须转义** ——
+    否则搜「100%」会退化成「100 开头且后面任意」，搜「a_b」会连「axb」一起命中。
+    """
+
+    @staticmethod
+    def _chapter(idx: int, content: str, book_id: str = "book_1") -> Chapter:
+        """造一章。身份字段必须逐章不同 ——
+        ``(book_id, identity_key)`` 上有唯一约束，用默认值会让多章撞在一起。
+        """
+        return make_chapter(
+            f"chap_{idx}",
+            book_id,
+            source_chapter_id=f"c{idx}",
+            url=f"https://example.com/{idx}",
+            index=idx,
+            content=content,
+        )
+
+    async def test_命中并给出片段(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(self._chapter(1, "李善德接到一个差事，要把鲜荔枝从岭南运到长安。"))
+
+        hits = await chapters.search_content("荔枝")
+
+        assert len(hits) == 1
+        assert hits[0].book_title == "三体"  # 书名是 join 出来的
+        assert hits[0].chapter_title == "第一章"
+        assert "荔枝" in hits[0].snippet
+
+    async def test_只返回片段不返回全文(self, chapters: SqliteChapterRepository) -> None:
+        """一本几千章的书，搜一次就把几十兆正文读进内存是不可接受的。"""
+        long_text = "前缀" * 500 + "目标词" + "后缀" * 500
+        await chapters.save(self._chapter(1, long_text))
+
+        hits = await chapters.search_content("目标词")
+
+        assert len(hits[0].snippet) < 200
+        assert "目标词" in hits[0].snippet
+
+    async def test_未命中返回空(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(self._chapter(1, "正文内容"))
+
+        assert await chapters.search_content("不存在的词") == []
+
+    async def test_百分号不被当通配符(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(self._chapter(1, "进度百分之百，100% 完成"))
+        await chapters.save(self._chapter(2, "100 个苹果"))
+
+        hits = await chapters.search_content("100%")
+
+        assert len(hits) == 1
+        assert "100%" in hits[0].snippet
+
+    async def test_下划线不被当通配符(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(self._chapter(1, "字段名是 a_b"))
+        await chapters.save(self._chapter(2, "字段名是 axb"))
+
+        hits = await chapters.search_content("a_b")
+
+        assert len(hits) == 1
+        assert "a_b" in hits[0].snippet
+
+    async def test_限定书籍(self, chapters: SqliteChapterRepository, db: Database) -> None:
+        await SqliteBookRepository(db).save(make_book(book_id="book_2", source_book_id="2002"))
+        await chapters.save(self._chapter(1, "这里有荔枝"))
+        await chapters.save(self._chapter(2, "这里也有荔枝", book_id="book_2"))
+
+        assert len(await chapters.search_content("荔枝")) == 2
+        only = await chapters.search_content("荔枝", book_id="book_2")
+        assert [h.book_id for h in only] == ["book_2"]
+
+    async def test_空关键词返回空(self, chapters: SqliteChapterRepository) -> None:
+        """空串会让 LIKE '%%' 命中一切，必须挡住。"""
+        await chapters.save(self._chapter(1, "正文内容"))
+
+        assert await chapters.search_content("") == []
+
+    async def test_尊重_limit(self, chapters: SqliteChapterRepository) -> None:
+        for i in range(5):
+            await chapters.save(self._chapter(i, f"第{i}章 有荔枝"))
+
+        assert len(await chapters.search_content("荔枝", limit=2)) == 2
+
+    async def test_按书与章节序号排序(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(self._chapter(2, "荔枝"))
+        await chapters.save(self._chapter(1, "荔枝"))
+
+        hits = await chapters.search_content("荔枝")
+
+        assert [h.chapter_index for h in hits] == [1, 2]
