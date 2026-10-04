@@ -134,6 +134,18 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 所以 `url_join` 只能用「像不像 URL」来条件化（规范 §6.4 的折中）。
 原始规划书说 v1.1 会加字段级，目前还没做。
 
+**`Book.status` 永远是 UNKNOWN。** `BookStatus` 枚举的文档写着
+「由书源尽力解析，未知时为 UNKNOWN」，但**从书源到 `Book.status` 的链路是断的** ——
+`BookDraft` 里根本没有 `status` 字段。全仓库它只出现在三处：枚举定义、
+`Book` 的默认值、从数据库读回时的转换，**没有任何地方把它设成
+ONGOING 或 COMPLETED**。
+
+这是第三个「声明了没接线」（前两个是 `network.headers` / `network.retry`，
+已修）。修它除了补 `BookDraft.status`，还要决定**书源怎么表达状态** ——
+本站的原始值是 `"1"`/`"0"`，而这两个值的含义每个站点都不一样，引擎不能硬编码。
+在 v1 里只能用「锚定整值的正则」绕过（`^1$` 只命中 status 字段），
+但那是在模拟字段级 transform。等确认要做再动。
+
 ### 低
 
 **`mog source test` 没实现。** fixture 测试在 `tests/` 里有基础设施，
