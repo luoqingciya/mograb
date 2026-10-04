@@ -186,6 +186,26 @@ jobs:
           fi
           exit $failed
 
+      # lint 只查规则能不能编译；这一步真跑一遍提取，
+      # 才能发现「选择器写错了、匹配不到东西」这类失效。
+      - name: Test example source against fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          tested=0
+          for f in tests/fixtures/**/fixtures/cases.yaml; do
+            tested=1
+            dir="$(dirname "$(dirname "$f")")"
+            echo "::group::source test $dir"
+            uv run mog source test "$dir"
+            echo "::endgroup::"
+          done
+          if [ "$tested" -eq 0 ]; then
+            echo "::error::没找到任何 fixtures/cases.yaml，示例书源的用例被删了？"
+            exit 1
+          fi
+
   # ---------------------------------------------------------------------------
   # 构建产物校验（确保包可安装）
   # ---------------------------------------------------------------------------
