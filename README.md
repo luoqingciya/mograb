@@ -41,19 +41,20 @@ content:
 
 版本 `0.1.0.dev0`。规范已经定下来，**整条链路都通了** ——
 命令行能装书源、搜书、下载、增量更新、导出；本地 API 也在同一套 Core 上跑起来了。
-还差的是桌面端。
 
-| 部分 | 状态 |
-|------|------|
-| Source Specification v1 / Domain Model v1 | 已冻结 |
-| 领域模型、书源加载与校验、提取器、变换、网络层、内容管线、导出 | 已实现，有测试 |
-| 任务引擎（队列 / Worker / 下载编排） | 已实现，有测试 |
-| 存储（8 张表 / 7 个仓储） | 已实现，有测试 |
-| CLI（`mog`，11 组命令） | 已实现，有测试 |
-| API（FastAPI，22 个端点 + SSE） | 已实现，有测试 |
-| 桌面端 | 占位 |
+```
+规范与领域模型    已冻结
+书源引擎 · 网络层  已实现
+内容管线 · 导出    已实现
+存储 · 任务引擎    已实现
+CLI · API        已实现
+桌面端           未开始
+```
 
-质量基线：439 个测试通过，覆盖率 83%，Ruff 与 Pyright 干净。
+439 个测试通过，覆盖率 83%，Ruff 与 Pyright 干净，CI 九项全绿。
+
+缺口、里程碑对照和下一步看 **[项目进度](docs/progress.md)** —— 进度信息只在那份文档里维护。
+其中最要紧的一条：**API 还没有认证**，当前只有 CORS。
 
 ## 上手
 
@@ -141,6 +142,7 @@ MoGrab/
 
 ## 文档
 
+- [项目进度](docs/progress.md) —— **做到哪了、还差什么**，进度只在这里维护
 - [架构总览](docs/architecture/overview.md) —— 分层、边界、数据流、技术选型
 - [Source Specification v1](docs/source-spec/source-spec-v1.md) —— 书源规范，最重要的一份
 - [Domain Model v1](docs/domain-model/domain-model-v1.md) —— 领域模型与任务状态机

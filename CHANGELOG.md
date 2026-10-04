@@ -129,14 +129,14 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 ### 还没做
 
+完整清单和优先级在 [docs/progress.md](docs/progress.md)。最要紧的一条：
+
 - API 没有认证，只有 CORS。**v0.4.0 之前必须补上随机 token**
-- `.mgs` 打包格式没做，第一阶段只支持裸 `.yaml`
-- 桌面端只有占位界面
-- 桌面端打包在 `apps/desktop/package-lock.json` 出现前会跳过
 
 ## 版本规划
 
-按规划书的节奏走：
+按规划书的节奏走（这里是**目标**，各版本实际做到哪一步见
+[docs/progress.md](docs/progress.md)）：
 
 | 版本 | 目标 |
 |------|------|

@@ -279,38 +279,37 @@ RetryPolicy.should_retry(error, attempt)?
 规划书 §60 定的顺序，不要跳步。
 
 ```
-Source Specification    已冻结
+Source Specification
         ↓
-Domain Model            已冻结
+Domain Model
         ↓
-Parser / Transformer    已实现，有测试
+Parser / Transformer
         ↓
-HTTP Layer              已实现，有测试
+HTTP Layer
         ↓
-Storage                 仓储已全部实现，含书源、导出与 HTTP 缓存
+Storage
         ↓
-Task Engine             状态机、队列、Worker、下载编排均已实现
+Task Engine
         ↓
-Export                  已实现，有测试
+Export
         ↓
-API                     已实现，22 个端点 + SSE
+API
         ↓
-CLI                     已实现，11 组命令
+CLI
         ↓
-Desktop                 骨架就位
+Desktop
 ```
 
 Electron 界面放到最后。UI 是最容易看到成果的部分，但也是最难用来决定核心架构的
 部分 —— 先做它会逼着核心去迁就界面。
 
+各层现在做到哪一步，见[项目进度](../progress.md) —— 那才是进度信息的唯一出处，
+这里只描述顺序本身。
+
 ## 质量基线
 
-| 项 | 现状 |
-|----|------|
-| 测试 | 439 个通过（单元 / 集成 / CLI / API / 书源 fixture） |
-| Lint | Ruff 无告警 |
-| 类型 | Pyright 0 错误 |
-| 覆盖率 | 83%，门槛设在 70% |
+测试、覆盖率、CI 的当前数值同样维护在[项目进度](../progress.md)里。
+这里只说门槛：覆盖率 `fail_under = 70`，Ruff 与 Pyright 必须干净。
 
 ## 相关文档
 
