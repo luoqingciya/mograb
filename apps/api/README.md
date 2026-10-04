@@ -10,7 +10,7 @@ uv run python -m mograb_api       # 等价
 uv run mog server start           # 由 CLI 拉起
 ```
 
-默认监听 `127.0.0.1:48721`（仅本机，规划书 §40）。
+默认监听 `127.0.0.1:48721`（仅本机）。
 
 ## 端点
 

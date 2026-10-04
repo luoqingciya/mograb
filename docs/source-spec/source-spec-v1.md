@@ -3,7 +3,7 @@
 > 状态：已冻结
 > 版本：`spec_version: 1`
 > 生效日期：2026-10-04
-> 对应规划书：§3.2、§3.3、§7–§13、§41、§53
+> 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§3.2、§3.3、§7–§13、§41、§53
 > Python 映射：`mograb/domain/source.py`
 
 ---
@@ -83,7 +83,7 @@ transforms:   [...]
 | `permissions` | object | 否 | 权限声明 |
 | `transforms` | list | 否 | 全局变换，作用于所有能力的提取结果 |
 
-> **`spec_version` 与 `version` 是两个不同的字段**，这是对规划书 §7/§13/§53
+> **`spec_version` 与 `version` 是两个不同的字段**，这是对原始规划书 §7 / §13 / §53
 > 中 `version` 语义冲突的修正。详见 `docs/architecture/decisions/ADR-0002`。
 
 ### 2.2 未知字段处理
@@ -130,7 +130,7 @@ if source.supports(SourceCapability.SEARCH):
 results = await engine.search(source, keyword)  # 未声明 search 时会抛错
 ```
 
-注意：规划书 §9 的表述「而不是 `source.search()`」易被误读为「禁止调用方法」。
+注意：原始规划书 §9 的表述「而不是 `source.search()`」易被误读为「禁止调用方法」。
 正确规则是**不得假定能力存在**；具备能力时调用完全合法。
 
 ---
@@ -408,7 +408,7 @@ Core 加载书源时依次检查：
 
 任一不满足抛 `SourceUnsupportedError`，**不静默降级解析**。
 
-> 这是 §53 的核心意图：防止新版书源被旧 Core 静默错误解析，
+> 这么定的意图：防止新版书源被旧 Core 静默错误解析，
 > 产生难以诊断的提取失败。
 
 ---

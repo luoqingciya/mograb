@@ -3,7 +3,7 @@
 > 状态：已冻结
 > 版本：v1
 > 生效日期：2026-10-04
-> 对应规划书：§23、§24、§25、§39
+> 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§23、§24、§25、§39
 > Python 映射：`mograb/storage/`
 
 ---
@@ -93,7 +93,7 @@ settings     （键值）
 | `capabilities` | JSON | NOT NULL | 能力列表 |
 | `enabled` | BOOL | NOT NULL | 是否启用 |
 | `installed_version` | TEXT | NOT NULL | 当前安装版本 |
-| `previous_version` | TEXT | | 上一版本（用于回滚，§56） |
+| `previous_version` | TEXT | | 上一版本（用于回滚） |
 | `health` | TEXT | NOT NULL | healthy / degraded / broken / unsupported / unknown |
 | `installed_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
@@ -318,7 +318,7 @@ class BookRepository(Protocol):
 
 ### 4.4 HTTP 缓存的三层失效
 
-`SqliteHttpCache` 把规划书 §16 要求的「必须提供失效策略」落成三层：
+`SqliteHttpCache` 把「必须提供失效策略」这条要求落成三层：
 
 | 层级 | 机制 | 触发点 |
 |------|------|--------|
@@ -342,7 +342,7 @@ class BookRepository(Protocol):
 
 ## 5. 事务与数据一致性
 
-> 核心约束（规划书 §39）：
+> 核心约束：
 
 ```
 Download → Validate → Transaction → Persist
@@ -385,7 +385,7 @@ await chapter_repo.save_many(chapters)  # 单事务，保证原子性
 - **建表**：`Database.init_schema()` 使用 `Base.metadata.create_all`（幂等）
 - **迁移**：正式迁移由 **Alembic** 负责（依赖已声明，`alembic/` 目录待建）
 
-> 规划书 §58 技术栈未列迁移工具，但 §1.0 要求「Database migration 稳定」。
+> 原始规划书的技术栈里没列迁移工具，但 v1.0 目标要求「Database migration 稳定」。
 > 本仓库补充 Alembic，详见评估报告 P2-06。
 
 ### 6.1 迁移政策

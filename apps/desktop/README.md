@@ -16,7 +16,7 @@ mograb-api.exe (Sidecar)
 MoGrab Core
 ```
 
-## 职责边界（规划书 §32）
+## 职责边界
 
 Desktop **只负责**：
 

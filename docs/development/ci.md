@@ -1,6 +1,6 @@
 # 持续集成与发布
 
-> 对应规划书：§48、§57
+> 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§48、§57
 > 工作流：`.github/workflows/ci.yml`、`.github/workflows/release.yml`
 
 ---
@@ -107,7 +107,7 @@ SHA256SUMS.txt
 GitHub Release（draft）
 ```
 
-### 3.4 产物清单（§57.7）
+### 3.4 产物清单
 
 | 产物 | 类型 | 说明 |
 |------|------|------|
@@ -121,7 +121,7 @@ GitHub Release（draft）
 `package-lock.json`。工作流会检测这个文件，缺了就跳过桌面端那一路并打一条
 warning，等桌面端真正做起来（`npm install` 生成 lockfile 并提交）会自动生效。
 
-### 3.5 打包原则（§57.1、§57.2）
+### 3.5 打包原则
 
 | 原则 | 说明 |
 |------|------|
@@ -168,11 +168,11 @@ uv run python scripts/build.py clean
 
 | 项 | 说明 | 关联 |
 |----|------|------|
-| E2E 测试 job | `CLI → API → Task → DB → Export` 全链路 | §47 |
+| E2E 测试 job | `CLI → API → Task → DB → Export` 全链路 | 见测试策略 |
 | 依赖漏洞扫描 | `pip-audit` 或 GitHub Dependabot | 评估报告 P3-06 |
 | EPUB 规范校验 | 对生成的 EPUB 运行 `epubcheck` | ADR-0003 |
 | 导入边界检查 | 禁止 `mograb.domain` 依赖基础设施、`mograb.export` 依赖 `mograb.network` | ADR-0001 |
-| Desktop CI（lint/build） | Electron 侧的 lint 与打包验证 | §48 |
+| Desktop CI（lint/build） | Electron 侧的 lint 与打包验证 | CI |
 | 缓存 CI 产物 | 加速重复构建 | — |
 
 ---

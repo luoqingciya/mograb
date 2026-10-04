@@ -3,7 +3,7 @@
 > 状态：已冻结
 > 版本：v1
 > 生效日期：2026-10-04
-> 对应规划书：§6、§17、§9
+> 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§6、§17、§9
 > Python 映射：`mograb/domain/`
 
 ---
@@ -168,7 +168,7 @@ class Book:
 没有它就没法抓目录，也没法做增量更新。`source_book_id` 不能顶替 ——
 书源给了 `id` 字段时它是个站内编号（比如 `1001`），不是 URL。
 
-> 相对规划书 §6.2 的补全：`language` / `word_count` / `chapter_count` / `cover_path`。
+> 这几个字段是相对原始规划书补的：`language` / `word_count` / `chapter_count` / `cover_path`。
 > 详见评估报告 P1-04。`url` 是实现调度器时发现缺的。
 
 ### 3.3 BookStatus
@@ -297,7 +297,7 @@ class Task:
 
 ### 5.1 状态机（形式化）
 
-> 规划书 §17 列出了状态但**未定义转移规则**。本节将其形式化。
+> 原始规划书 §17 列出了状态但**未定义转移规则**。本节将其形式化。
 
 ```
 PENDING   → RUNNING | PAUSED | CANCELLED
@@ -418,7 +418,7 @@ MoGrabError                       code: MOGRAB_ERROR
 ### 7.1 `retryable` 属性
 
 每个错误类携带 `retryable: bool`，由 `RetryPolicy` 直接读取。
-**避免在重试策略中散落 `isinstance` 判断**——这是规划书 §37 未明确但必要的补充。
+**避免在重试策略中散落 `isinstance` 判断**—— 这是刻意加的补充，原始规划书没提。
 
 | 错误 | retryable |
 |------|-----------|

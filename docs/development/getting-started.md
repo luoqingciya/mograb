@@ -1,6 +1,6 @@
 # 开发指南
 
-> 对应规划书：§46、§47、§48、§49
+> 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§46、§47、§48、§49
 
 ---
 
@@ -14,7 +14,7 @@
 | uv | ≥ 0.5 | 依赖与虚拟环境管理 |
 | Node.js | ≥ 20 | **仅** Desktop 开发需要 |
 
-> 最终用户**无需**安装 Python、uv 或 Node.js（见 §57.1）。
+> 最终用户**无需**安装 Python、uv 或 Node.js（见[规划书](../planning/项目规划书.md) §57.1）。
 > 上述工具仅属于开发与构建链路。
 
 ### 1.2 初始化
@@ -129,7 +129,7 @@ uv run python -c "from mograb_api.main import create_app; print(len(create_app()
 
 ## 4. 测试策略
 
-> 规划书 §47 要求四层测试。
+测试分四层。
 
 | 层 | 目录 | 标记 | 说明 |
 |----|------|------|------|
@@ -143,7 +143,7 @@ uv run python -c "from mograb_api.main import create_app; print(len(create_app()
 测试默认离线。需要真实网络的测试必须标 `@pytest.mark.network`，CI 里默认跳过。
 
 书源测试用 `tests/fixtures/` 下的 HTML 快照。站点改版后先用 fixture 复现问题，
-再改规则（规划书 §12）。
+再改规则。
 
 ### 4.2 数据目录隔离
 
@@ -163,7 +163,7 @@ uv run python -c "from mograb_api.main import create_app; print(len(create_app()
 
 ## 5. 代码规范
 
-> 规划书 §49 要求：type hints、public API 的 docstring、小函数、依赖倒置。
+要求：type hints、public API 的 docstring、小函数、依赖倒置。
 
 ### 5.1 强制项
 
@@ -196,7 +196,7 @@ fastapi 等基础设施库。这是架构边界的核心（见架构总览 §3.2
 
 ## 6. Git 分支策略
 
-> 规划书 §46。**不搞过于复杂的 Git Flow。**
+**不搞过于复杂的 Git Flow。**
 
 ```
 main         稳定版本，只接受来自 develop 的合并

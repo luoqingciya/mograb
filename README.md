@@ -151,6 +151,7 @@ MoGrab/
 - [开发指南](docs/development/getting-started.md) —— 环境、命令、提交规范
 - [CI 与发布](docs/development/ci.md) —— 流水线与打包
 - [规划评估报告](docs/evaluation/规划评估报告.md) —— 对原始规划书的评估，以及几个关键裁决的理由
+- [原始规划书](docs/planning/项目规划书.md) —— 历史存档，**不是规范**，只用来追溯出处
 - [ADR](docs/architecture/decisions/) —— 架构决策记录
 
 ## 不做什么

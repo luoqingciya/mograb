@@ -186,7 +186,7 @@ docs(spec): 冻结 Source Specification v1
 书源是本项目最重要的产出，但**不进这个仓库** —— 涉及第三方站点的抓取规则
 不适合随主仓库分发。`sources/` 已经在 `.gitignore` 里，是纯本地的开发目录。
 
-要分享书源，直接发 `source.yaml` 文件，或者打包成 `.mgs`（格式见规范 §11）。
+要分享书源，直接发 `source.yaml` 文件，或者打包成 `.mgs`（格式见[规范](docs/source-spec/source-spec-v1.md) §11）。
 想在本地留个备份，自己开个私有仓库放着。
 
 ### 目录结构
