@@ -105,16 +105,19 @@ class WorkerPool:
 
     async def _handle(self, task: Task) -> None:
         """执行单个任务。"""
+        # 先进入 RUNNING。状态机不允许 PENDING 直接跳到终态，
+        # 所以「没有 handler」这类失败也必须发生在 RUNNING 之后。
+        task.transition_to(TaskStatus.RUNNING)
+        await self._notify(task)
+
         handler = self._handlers.get(task.type.value)
         if handler is None:
             _logger.error("worker.no_handler", task_type=task.type.value)
-            task.transition_to(TaskStatus.FAILED)
             task.error_code = "NO_HANDLER"
+            task.error_message = f"没有注册处理 {task.type.value} 的 handler"
+            task.transition_to(TaskStatus.FAILED)
             await self._notify(task)
             return
-
-        task.transition_to(TaskStatus.RUNNING)
-        await self._notify(task)
 
         try:
             if self.is_cancelled(task.id):
