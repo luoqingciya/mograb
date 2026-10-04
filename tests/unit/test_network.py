@@ -403,6 +403,69 @@ class TestHttpClientFetch:
         assert result.status_code == 200
 
 
+class TestMaxRetriesOverride:
+    """书源用 ``network.retry`` 声明的重试次数要真的生效。
+
+    这个字段以前是死的：``NetworkPolicy`` 里声明了、规范里写了、
+    官方参考书源也配了，但引擎从来没把它传下去 —— 静默无效。
+    """
+
+    async def test_默认用全局策略(self) -> None:
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return httpx.Response(503)
+
+        policy = RetryPolicy(max_retries=2, base_delay=0.0, jitter=0.0)
+        async with make_client(handler, retry=policy) as client:
+            with pytest.raises(HttpStatusError):
+                await client.fetch("GET", "https://example.com/a")
+
+        assert len(calls) == 3  # 首次 + 2 次重试
+
+    async def test_覆盖全局策略(self) -> None:
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return httpx.Response(503)
+
+        policy = RetryPolicy(max_retries=5, base_delay=0.0, jitter=0.0)
+        async with make_client(handler, retry=policy) as client:
+            with pytest.raises(HttpStatusError):
+                await client.fetch("GET", "https://example.com/a", max_retries=1)
+
+        assert len(calls) == 2  # 首次 + 1 次重试
+
+    async def test_零次重试(self) -> None:
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return httpx.Response(503)
+
+        policy = RetryPolicy(max_retries=5, base_delay=0.0, jitter=0.0)
+        async with make_client(handler, retry=policy) as client:
+            with pytest.raises(HttpStatusError):
+                await client.fetch("GET", "https://example.com/a", max_retries=0)
+
+        assert len(calls) == 1
+
+    async def test_只改次数不改退避曲线(self) -> None:
+        """书源不该管退避算法，所以 base_delay 仍用全局配置。"""
+        policy = RetryPolicy(max_retries=5, base_delay=0.0, jitter=0.0)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503)
+
+        async with make_client(handler, retry=policy) as client:
+            with pytest.raises(HttpStatusError):
+                await client.fetch("GET", "https://example.com/a", max_retries=1)
+
+        assert client._config.retry.max_retries == 5  # 全局配置没被改
+
+
 class TestEncodingDetection:
     def _response(self, content: bytes, headers: dict[str, str] | None = None) -> httpx.Response:
         return httpx.Response(200, content=content, headers=headers or {})

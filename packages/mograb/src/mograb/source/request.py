@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -109,12 +110,29 @@ def find_variables(template: str) -> set[str]:
     return {m.group(1) for m in _VAR_RE.finditer(template)}
 
 
-def build_request(spec: RequestSpec, context: TemplateContext) -> RenderedRequest:
-    """把书源的 :class:`RequestSpec` 渲染为具体请求。"""
+def build_request(
+    spec: RequestSpec,
+    context: TemplateContext,
+    *,
+    default_headers: Mapping[str, str] | None = None,
+) -> RenderedRequest:
+    """把书源的 :class:`RequestSpec` 渲染为具体请求。
+
+    Args:
+        spec: 书源里声明的请求规格。
+        context: 模板变量上下文。
+        default_headers: 来源级默认请求头（来自 ``network.headers``）。
+            会被 ``request.headers`` 覆盖 —— 越具体的声明优先级越高。
+            两处都能写是有意的：UA / Referer 这类对整站通用的放 ``network``，
+            只在某个端点需要的放 ``request``。
+    """
+    headers = {k: render(v, context) for k, v in (default_headers or {}).items()}
+    headers.update({k: render(v, context) for k, v in spec.headers.items()})
+
     return RenderedRequest(
         method=spec.method,
         url=render(spec.url, context),
-        headers={k: render(v, context) for k, v in spec.headers.items()},
+        headers=headers,
         params={k: render(str(v), context) for k, v in spec.query.items()},
         data=_render_body(spec.body, context),
         cookies={k: render(v, context) for k, v in spec.cookies.items()},

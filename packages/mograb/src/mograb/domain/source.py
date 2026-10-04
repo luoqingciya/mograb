@@ -251,6 +251,33 @@ class ResponseSpec(BaseModel):
 # ---------------------------------------------------------------------------
 # 各能力的具体规格
 # ---------------------------------------------------------------------------
+class PaginationSpec(BaseModel):
+    """列表型响应的翻页规格（可选）。
+
+    只支持**跟着「下一页」链接走**这一种翻页方式：站点的分页 URL 形态各异
+    （``?page=2`` / ``/list_2.html`` / 带 token 的路径），靠猜规律很容易
+    在某次改版后静默失效。让页面自己告诉我们下一页在哪，是最稳的做法。
+
+    ``next`` 提取不到值时即为最后一页 —— 这正是站点表达「没有下一页」的
+    自然方式（链接消失）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    next: ExtractRule = Field(description="指向「下一页」的提取规则，如 '.pager a@href'")
+    max_pages: int = Field(
+        default=20,
+        ge=2,
+        le=200,
+        description="翻页上限，防止规则写错时无限抓取",
+    )
+
+    @field_validator("next", mode="before")
+    @classmethod
+    def _v_next(cls, v: Any) -> Any:
+        return _parse_rule(v)
+
+
 class ResultSpec(BaseModel):
     """列表型响应（搜索、目录）的提取规格。"""
 
@@ -261,6 +288,10 @@ class ResultSpec(BaseModel):
     reverse: bool = Field(
         default=False,
         description="目录倒序修正（部分站点最新章节在前）",
+    )
+    paginate: PaginationSpec | None = Field(
+        default=None,
+        description="翻页规格；为 None 时只抓第一页",
     )
 
     @field_validator("list", mode="before")
@@ -525,6 +556,7 @@ __all__ = [
     "ExtractRule",
     "InstalledSource",
     "NetworkPolicy",
+    "PaginationSpec",
     "Permissions",
     "RequestSpec",
     "ResponseSpec",

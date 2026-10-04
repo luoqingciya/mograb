@@ -90,12 +90,17 @@ class TestChangelogShape:
             f"CHANGELOG 里没有 `## [{version}]` 标题，发布说明会是空的"
         )
 
-    def test_标题带日期(self) -> None:
-        """`## [x] - 未发布` 这种标题在正式发布前要改成日期。"""
-        text = CHANGELOG.read_text(encoding="utf-8")
-        first = next(line for line in text.splitlines() if line.startswith("## ["))
+    def test_当前版本的标题带日期(self) -> None:
+        """`## [x] - 未发布` 这种标题在正式发布前要改成日期。
 
-        assert "未发布" not in first, f"发布前要把标题改成带日期的形式：{first}"
+        只看**当前 VERSION 对应**的那个标题 —— 顶部可能还有一个
+        `## [未发布]` 段落，那是正常的工作区。
+        """
+        version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        text = CHANGELOG.read_text(encoding="utf-8")
+
+        heading = next(line for line in text.splitlines() if line.startswith(f"## [{version}]"))
+        assert "未发布" not in heading, f"发布前要把标题改成带日期的形式：{heading}"
 
 
 class TestChecksums:

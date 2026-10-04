@@ -25,6 +25,16 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _HTML_ENTITY_HINT_RE = re.compile(r"&(?:[a-zA-Z]+|#\d+);")
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
 
+# 不间断空格（U+00A0）与全角空格（U+3000）。
+#
+# 这两个是网页正文里最常见的「伪缩进」：站点想让段落看起来缩进两格，
+# 又不想用真空格（会被 HTML 折叠），于是塞一串 &nbsp;。反转义之后就变成
+# U+00A0 —— 上面那个 _ZERO_WIDTH_RE 不含它（它是可见字符，不是零宽），
+# 所以不处理的话会一路进到导出文件里。
+#
+# 归一化成普通空格而不是直接删掉：万一它出现在词中间，删掉会把两个词粘一起。
+_PSEUDO_SPACE_RE = re.compile(r"[\u00a0\u3000]")
+
 # 常见站点水印/导航行（整行匹配时移除）
 _DEFAULT_JUNK_LINES: tuple[re.Pattern[str], ...] = (
     re.compile(
@@ -63,6 +73,10 @@ def clean_text(
     # 2) HTML 实体已在 Extractor 阶段处理；此处兜底常见残留
     result = result.replace("&nbsp;", " ").replace("&amp;", "&")
 
+    # 2.5) 伪缩进空格归一化。必须在实体反转义之后 ——
+    #       `&nbsp;` 这时才变成真正的 U+00A0。
+    result = _PSEUDO_SPACE_RE.sub(" ", result)
+
     # 3) 去零宽与不可见字符
     result = _ZERO_WIDTH_RE.sub("", result)
     result = _CONTROL_CHAR_RE.sub("", result)
@@ -75,10 +89,16 @@ def clean_text(
         except re.error:
             continue  # 非法正则由 Linter 报告，此处不阻断
 
-    lines = [line.rstrip() for line in result.split("\n")]
+    # 5) 逐行去首尾空白。
+    #
+    # 为什么连行首也去：网页正文的行首空白几乎总是「伪缩进」——
+    # 站点用一串 &nbsp; 假装段落缩进两格，纯属排版，不是内容。
+    # 留着它，导出的 TXT 里每段前面就是四个来路不明的空格。
+    # 段落缩进应该由导出层统一决定，而不是沿用各站点各自的土办法。
+    lines = [line.strip() for line in result.split("\n")]
     kept = [line for line in lines if not any(p.match(line) for p in patterns)]
 
-    # 5) 合并多余空行
+    # 6) 合并多余空行
     return _BLANK_LINES_RE.sub("\n\n", "\n".join(kept)).strip()
 
 

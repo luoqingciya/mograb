@@ -16,11 +16,11 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 542 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 581 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 11,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 5,450 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 6,000 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（7 个 job） | `gh run list` |
@@ -113,11 +113,13 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 还是占位页。先跑通闭环是为了验证「Electron + 本地 API + SSE」这套架构真的成立 ——
 现在验证过了，剩下的是照着补页面。
 
-**所有测试都是离线的。** fixture 测试用的是 HTML 快照，没有在真实站点上跑过
-完整下载。接口之间对得上（端到端测试证明了这一点），但真实站点的
-编码、反爬、目录结构差异都还没遇到过。这是下一个该验证的事。
-
 ### 中
+
+**真实站点只验证过一个。** `bqgnovels.com` 的书源跑通了（1453 章完整目录、
+正文清洗干净），但那是 Nuxt SSR 站点、内容直出 HTML，属于**最简单的一类**。
+还没遇到过的：需要 JS 渲染的、有真实反爬的、用 GBK 编码的、
+目录分页方式不是「下一页链接」的。书源分页目前只支持「跟着下一页链接走」，
+遇到靠页码规律翻页的站点还需要扩展。
 
 **Source Registry 没实现。** 书源的分发、安装、更新、回滚这条链路只有本地安装
 （`mog source install <file>`）能用。原始规划书 §13、§55、§56 描述的远端流程都还是空的。
@@ -127,6 +129,10 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 **EPUB 的封面和元数据模板没做。** 导出结构是规范的（有离线测试验证
 `mimetype` 顺序、OPF、NCX），但封面图不下载，元数据也不能按模板配。
+
+**没有字段级 transform。** `transform` 作用于能力下的所有字段，
+所以 `url_join` 只能用「像不像 URL」来条件化（规范 §6.4 的折中）。
+原始规划书说 v1.1 会加字段级，目前还没做。
 
 ### 低
 
@@ -147,16 +153,19 @@ API 的所有业务端点都要求 Bearer 令牌；桌面端目前只做到最�
 
 按依赖顺序：
 
-1. **在真实站点上验证一次完整下载** —— 所有测试都离线，这是最大的未知。
+1. **再验证几个不同类型的真实站点** —— 补上 JS 渲染、反爬、GBK 编码、
+   页码式翻页这几类，才能说「书源规范够用」。
 2. **桌面端补全页面** —— 书架、书源管理、设置。架构已验证，照着加就行。
 3. **Source Registry** —— 让书源能分发和更新。
 4. **Alembic 迁移** —— 趁 schema 还简单，把迁移链路搭起来。
 
 ## 已完成的重要节点
 
+- **首个真实站点书源跑通**（2026-10-04）。`bqgnovels.com` 完整目录 1453 章、
+  正文清洗干净。过程中暴露并修掉了四个引擎缺口（分页、`network` 死配置、
+  `<br>` 分段、U+00A0 清洗）和一个 httpx `params={}` 清空查询串的真 bug。
 - **首个预发布版本 `1.0.0rc0`**（2026-10-04）。规范冻结、核心链路跑通、
-  API 与 CLI 接线完成、桌面端最小闭环可用。**是 rc 不是正式版** ——
-  还没在真实站点上验证过完整下载。
+  API 与 CLI 接线完成、桌面端最小闭环可用。
 - **v0.4.0 的认证缺口已补**（2026-10-04）。API 的所有业务端点现在要求
   `Authorization: Bearer <token>`，令牌自动生成在 `data/token`。
   详见 [ADR-0004](architecture/decisions/ADR-0004-local-api-auth.md)

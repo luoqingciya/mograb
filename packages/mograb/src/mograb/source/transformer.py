@@ -28,6 +28,13 @@ from ..errors import SourceExecutionError
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
+# 块级换行边界。中文小说站普遍用 <br> 分段（而不是 <p>），
+# 如果直接按标签删掉，整章会糊成一整行 —— 所以先把这些边界换成换行。
+_BR_RE = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
+_BLOCK_END_RE = re.compile(
+    r"</\s*(?:p|div|li|tr|h[1-6]|blockquote|section|article)\s*>", re.IGNORECASE
+)
+
 # url_join 的「像 URL 引用」判定
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 _FILENAME_LIKE_RE = re.compile(
@@ -107,6 +114,20 @@ def apply_transforms_many(
     ]
 
 
+def _strip_html(value: str) -> str:
+    """去标签并反转义实体，**保留块级换行**。
+
+    先做换行替换再删标签，顺序不能反：删完标签就分不清哪里该断行了。
+
+    为什么必须保留换行：中文小说站的正文普遍是
+    ``第一段<br><br>第二段<br><br>...``，直接删标签会得到一整行，
+    后面就算接 ``normalize_whitespace`` 也救不回来。
+    """
+    text = _BR_RE.sub("\n", value)
+    text = _BLOCK_END_RE.sub("\n", text)
+    return unescape(_TAG_RE.sub("", text))
+
+
 def _apply_one(value: str | None, transform: Transform, *, base_url: str | None) -> str | None:
     op = transform.op
 
@@ -117,7 +138,7 @@ def _apply_one(value: str | None, transform: Transform, *, base_url: str | None)
         return _WS_RE.sub(" ", value).strip() if value else value
 
     if op is TransformOp.REMOVE_HTML:
-        return unescape(_TAG_RE.sub("", value)) if value else value
+        return _strip_html(value) if value else value
 
     if op is TransformOp.REPLACE:
         if value is None or transform.pattern is None:

@@ -14,15 +14,19 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol, runtime_checkable
+from urllib.parse import urljoin
 
 from ..domain.enums import SourceCapability
-from ..domain.source import SourceSpec
+from ..domain.source import ResultSpec, SourceSpec
 from ..errors import SourceExecutionError, SourceUnsupportedError
+from ..logging.setup import get_logger
 from .extractor import Document, extract_many, extract_one
 from .request import RenderedRequest, TemplateContext, build_request
 from .transformer import apply_transforms, apply_transforms_many
+
+_logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +102,7 @@ class Fetcher(Protocol):
         allowed_domains: Collection[str] | None = ...,
         concurrency: int | None = ...,
         min_interval: float | None = ...,
+        max_retries: int | None = ...,
     ) -> ResponseLike: ...
 
 
@@ -129,10 +134,12 @@ class SourceEngine:
         assert source.search is not None  # 由 _require 保证
 
         context = TemplateContext({"keyword": keyword, "page": page})
-        request = build_request(source.search.request, context)
-        document = await self._fetch_document(source, request, source.search.response.format)
-
-        rows = extract_many(document, source.search.result.list, source.search.result.fields)
+        request = build_request(
+            source.search.request, context, default_headers=source.network.headers
+        )
+        rows = await self._collect_rows(
+            source, request, source.search.result, source.search.response.format
+        )
         rows = apply_transforms_many(
             rows, [*source.transforms, *source.search.transform], base_url=request.url
         )
@@ -156,6 +163,73 @@ class SourceEngine:
             )
         return results
 
+    async def _collect_rows(
+        self,
+        source: SourceSpec,
+        request: RenderedRequest,
+        result: ResultSpec,
+        fmt: str,
+    ) -> list[dict[str, str | None]]:
+        """抓取列表项；声明了 ``result.paginate`` 时跟着「下一页」链接继续抓。
+
+        循环的三个终止条件：取不到 ``next``（站点表示「没有下一页」的自然方式）、
+        下一页地址已经抓过（防止站点把链接永远指向自己）、
+        或者到达 ``max_pages`` 上限。
+
+        到达上限会**记一条 WARNING**。不能静默截断 —— 用户会以为整本书下完了。
+        """
+        rows: list[dict[str, str | None]] = []
+        pagination = result.paginate
+        visited = {request.url}
+        current = request
+        page_no = 0
+
+        while True:
+            page_no += 1
+            document = await self._fetch_document(source, current, fmt)
+            rows.extend(extract_many(document, result.list, result.fields))
+
+            if pagination is None:
+                break
+
+            if page_no >= pagination.max_pages:
+                _logger.warning(
+                    "source.pagination_limit_reached",
+                    source_id=source.id,
+                    max_pages=pagination.max_pages,
+                    url=current.url,
+                    rows=len(rows),
+                )
+                break
+
+            next_href = extract_one(document, pagination.next)
+            if not next_href:
+                break
+
+            next_url = urljoin(current.url, next_href.strip())
+            if next_url in visited:
+                _logger.warning(
+                    "source.pagination_loop_detected",
+                    source_id=source.id,
+                    url=next_url,
+                    page=page_no,
+                )
+                break
+            visited.add(next_url)
+
+            # 下一页地址按站点给的原样用，不再合并首页的 query ——
+            # 「下一页」链接本来就是站点对该页的完整表述，再叠一次首页参数
+            # 会出现 page=1&page=2 这种重复。所以书源里的 next 必须指向
+            # 自包含的完整地址（规范 §5.4 有说明）。
+            #
+            # 这里必须是 `params=None` 而不是 `params={}`：httpx 遇到空 dict
+            # 会先清掉 URL 自带的查询串再赋空参数 —— 等于把 `?page=2` 抹掉，
+            # 又抓回第一页。真实站点上踩过，而且离线快照测不出来
+            # （假 fetcher 不看 params）。
+            current = replace(current, url=next_url, params=None)
+
+        return rows
+
     # ---- 书籍详情 ----
     async def fetch_book(self, source: SourceSpec, book_url: str) -> BookDraft:
         """抓取书籍详情。"""
@@ -163,7 +237,9 @@ class SourceEngine:
         assert source.book is not None
 
         context = TemplateContext({"book.url": book_url})
-        request = build_request(source.book.request, context)
+        request = build_request(
+            source.book.request, context, default_headers=source.network.headers
+        )
         document = await self._fetch_document(source, request, source.book.response.format)
 
         fields: dict[str, str | None] = {}
@@ -199,10 +275,12 @@ class SourceEngine:
         assert source.chapters is not None
 
         context = TemplateContext({"book.url": book_url})
-        request = build_request(source.chapters.request, context)
-        document = await self._fetch_document(source, request, source.chapters.response.format)
-
-        rows = extract_many(document, source.chapters.result.list, source.chapters.result.fields)
+        request = build_request(
+            source.chapters.request, context, default_headers=source.network.headers
+        )
+        rows = await self._collect_rows(
+            source, request, source.chapters.result, source.chapters.response.format
+        )
         rows = apply_transforms_many(
             rows, [*source.transforms, *source.chapters.transform], base_url=request.url
         )
@@ -234,7 +312,9 @@ class SourceEngine:
         assert source.content is not None
 
         context = TemplateContext({"chapter.url": chapter_url, "chapter.index": chapter_index or 0})
-        request = build_request(source.content.request, context)
+        request = build_request(
+            source.content.request, context, default_headers=source.network.headers
+        )
         document = await self._fetch_document(source, request, source.content.response.format)
 
         # 1) DOM 级清洗：移除噪声节点
@@ -276,6 +356,7 @@ class SourceEngine:
             # 限速也照书源自己声明的来，而不是用全局默认值
             concurrency=source.network.concurrency,
             min_interval=source.network.request_interval_ms / 1000,
+            max_retries=source.network.retry,
         )
         return Document(
             raw=response.content,

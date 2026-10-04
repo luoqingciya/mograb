@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -143,6 +143,7 @@ class HttpClient:
         allowed_domains: Collection[str] | None = None,
         concurrency: int | None = None,
         min_interval: float | None = None,
+        max_retries: int | None = None,
     ) -> HttpResult:
         """执行请求，自动应用缓存 / 限流 / 重试。
 
@@ -153,6 +154,8 @@ class HttpClient:
             concurrency: 该来源的并发上限。首次为该来源建限流器时生效，
                 之后沿用。不传则用注册表的默认值。
             min_interval: 该来源两次请求之间的最小间隔（秒）。
+            max_retries: 覆盖全局重试次数。书源用 ``network.retry`` 声明，
+                不传则用 :class:`HttpClientConfig` 里的策略。
 
         Raises:
             NetworkError: 网络层失败（可重试子类由 RetryPolicy 处理）。
@@ -187,6 +190,7 @@ class HttpClient:
             timeout_ms=timeout_ms,
             concurrency=concurrency,
             min_interval=min_interval,
+            max_retries=max_retries,
         )
 
         if cache_key is not None and self._cache is not None and result.status_code == 200:
@@ -211,6 +215,11 @@ class HttpClient:
         """带重试的请求执行。"""
         source_id = kwargs.get("source_id", "unknown")
         policy: RetryPolicy = self._config.retry
+        # 书源可以用 network.retry 覆盖重试次数；只换 max_retries，
+        # 退避曲线仍用全局配置 —— 书源不该管退避算法。
+        override = kwargs.get("max_retries")
+        if override is not None:
+            policy = replace(policy, max_retries=override)
         # 限流器按来源缓存，所以第一次请求带过来的策略会被沿用
         limiter = await self._limiters.get(
             source_id,

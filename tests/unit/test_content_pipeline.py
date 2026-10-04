@@ -37,6 +37,28 @@ class TestCleaner:
     def test_collapses_excess_blank_lines(self) -> None:
         assert "\n\n\n" not in clean_text("a\n\n\n\nb")
 
+    def test_归一化不间断空格(self) -> None:
+        """`&nbsp;` 反转义之后是 U+00A0 字符，不是实体 —— 之前漏了它。
+
+        站点用一串 &nbsp; 假装段落缩进，不处理的话会一路进到导出文件。
+        """
+        assert "\u00a0" not in clean_text("甲\u00a0\u00a0乙")
+        assert clean_text("甲\u00a0乙") == "甲 乙"
+
+    def test_归一化全角空格(self) -> None:
+        assert clean_text("甲\u3000乙") == "甲 乙"
+
+    def test_不间断空格在词中间不会被删掉(self) -> None:
+        """归一化成空格而不是直接删 —— 否则两个词会粘在一起。"""
+        assert clean_text("hello\u00a0world") == "hello world"
+
+    def test_去掉行首行尾空白(self) -> None:
+        """网页正文的行首空白是伪缩进，段落缩进该由导出层统一决定。"""
+        assert clean_text("    甲\n\t乙\n丙    ") == "甲\n乙\n丙"
+
+    def test_保留段落之间的空行(self) -> None:
+        assert clean_text("甲\n\n乙") == "甲\n\n乙"
+
 
 class TestNormalizer:
     def test_unifies_crlf(self) -> None:
