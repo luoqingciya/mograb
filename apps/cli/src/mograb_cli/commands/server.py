@@ -17,7 +17,7 @@ from pathlib import Path
 
 import typer
 
-from mograb.config import get_paths, load_settings
+from mograb.config import ensure_token, get_paths, load_settings
 
 from ._common import console, emit
 
@@ -130,6 +130,10 @@ def start(
             console.print(
                 f"已启动 [bold]http://{listen_host}:{listen_port}[/bold]（pid {process.pid}）"
             )
+            console.print(
+                "[dim]接口需要令牌，`mog server token` 可以打印出来；"
+                "CLI 和 Desktop 会自己读，不用手填[/dim]"
+            )
             return
         if process.poll() is not None:
             console.print(f"[red]server 启动失败[/red]，退出码 {process.returncode}")
@@ -205,6 +209,26 @@ def stop() -> None:
 
     _pid_file().unlink(missing_ok=True)
     console.print(f"已停止（pid {pid}）")
+
+
+@app.command("token")
+def token(
+    json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
+) -> None:
+    """打印 API 访问令牌。
+
+    CLI 和 Desktop 自己会读，这个命令是给手工调接口用的（curl、Swagger UI、
+    脚本）。**别把输出贴到公开的地方** —— 拿到令牌就等于拿到这个 API 的全部权限。
+    """
+    paths = get_paths()
+    value = ensure_token(paths)
+
+    emit({"token": value, "path": str(paths.token_file)}, json_output=json_output)
+    if json_output:
+        return
+
+    console.print(value)
+    console.print(f"[dim]{paths.token_file}[/dim]")
 
 
 __all__ = ["app"]

@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from mograb.errors import (
+    AuthError,
     ContentValidationError,
     EntityNotFoundError,
     ExportError,
@@ -39,6 +40,7 @@ from mograb_cli.commands._common import ExitCode, exit_code_for
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
+        (AuthError("缺少令牌"), 401),
         (EntityNotFoundError("书籍不存在"), 404),
         (SourceNotFoundError("书源不存在"), 404),
         (TaskNotFoundError("任务不存在"), 404),
@@ -74,6 +76,7 @@ def test_task_parameter_beats_task_error() -> None:
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
+        (AuthError("缺少令牌"), ExitCode.ERROR),
         (EntityNotFoundError("书籍不存在"), ExitCode.NOT_FOUND),
         (SourceNotFoundError("书源不存在"), ExitCode.NOT_FOUND),
         (TaskNotFoundError("任务不存在"), ExitCode.NOT_FOUND),

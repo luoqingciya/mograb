@@ -25,6 +25,7 @@ MoGrab 是**绿色便携**的：运行期数据全部放在运行目录下的 ``
     ├── mog.exe  /  _internal/          ← 程序
     └── data/                           ← 数据（可整体备份或删除）
         ├── config.toml
+        ├── token                       ← API 访问令牌（自动生成，0600）
         ├── mograb.db
         ├── cache/
         ├── covers/
@@ -49,6 +50,7 @@ DATA_DIRNAME = "data"
 
 # data/ 下的固定名称
 CONFIG_FILENAME = "config.toml"
+TOKEN_FILENAME = "token"
 DATABASE_FILENAME = "mograb.db"
 CACHE_DIRNAME = "cache"
 COVERS_DIRNAME = "covers"
@@ -102,6 +104,7 @@ class Paths:
 
     root: Path
     config_file: Path
+    token_file: Path
     database: Path
     cache_dir: Path
     covers_dir: Path
@@ -126,6 +129,7 @@ def get_paths(root: Path | None = None) -> Paths:
     return Paths(
         root=base,
         config_file=base / CONFIG_FILENAME,
+        token_file=base / TOKEN_FILENAME,
         database=base / DATABASE_FILENAME,
         cache_dir=base / CACHE_DIRNAME,
         covers_dir=base / COVERS_DIRNAME,
@@ -146,6 +150,7 @@ __all__ = [
     "EXPORTS_DIRNAME",
     "LOGS_DIRNAME",
     "SOURCES_DIRNAME",
+    "TOKEN_FILENAME",
     "Paths",
     "data_dir",
     "get_paths",

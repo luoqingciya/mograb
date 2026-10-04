@@ -5,6 +5,9 @@
 装配的，不用上下文管理器就不会触发，``app.state.application`` 是空的。
 
 全部离线：数据目录由 conftest 的 autouse fixture 指到临时目录。
+
+业务端点都要求 ``Authorization: Bearer <token>``，所以默认的 ``client``
+夹具带上令牌 —— 只有 ``TestAuth`` 用不带头的 ``anon_client``。
 """
 
 from __future__ import annotations
@@ -15,13 +18,28 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from mograb.config import ensure_token, get_paths
 from mograb_api.main import API_PREFIX, create_app
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def token() -> str:
+    """当前数据目录下的 API 令牌。"""
+    return ensure_token(get_paths())
+
+
+@pytest.fixture
+def client(token: str) -> Iterator[TestClient]:
+    """默认带令牌的客户端。"""
+    with TestClient(create_app(), headers={"Authorization": f"Bearer {token}"}) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def anon_client() -> Iterator[TestClient]:
+    """不带任何默认请求头的客户端，用来测认证本身。"""
     with TestClient(create_app()) as test_client:
         yield test_client
 
@@ -29,6 +47,88 @@ def client() -> Iterator[TestClient]:
 @pytest.fixture
 def example_yaml(example_source_dir: Path) -> str:
     return str(example_source_dir / "source.yaml")
+
+
+class TestAuth:
+    """令牌校验（规划书 §40、评估报告 P2-02）。
+
+    这里的核心不是「带上令牌能通」，而是**不带令牌时挡得住** ——
+    浏览器里的任意页面都能往 127.0.0.1 发简单请求，CORS 拦不住副作用。
+    """
+
+    def test_health_needs_no_token(self, anon_client: TestClient) -> None:
+        """健康检查保持开放 —— Desktop 探端口和 mog server status 都靠它。"""
+        assert anon_client.get("/health").status_code == 200
+
+    def test_docs_needs_no_token(self, anon_client: TestClient) -> None:
+        """Swagger UI 没法在浏览器里带请求头，锁上等于废掉这个页面。"""
+        assert anon_client.get("/docs").status_code == 200
+        assert anon_client.get("/openapi.json").status_code == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/sources", "/books", "/tasks", "/exports", "/search?q=x"],
+    )
+    def test_read_endpoints_need_token(self, anon_client: TestClient, path: str) -> None:
+        assert anon_client.get(f"{API_PREFIX}{path}").status_code == 401
+
+    def test_write_endpoint_needs_token(self, anon_client: TestClient) -> None:
+        """最要紧的一条：不能让人凭空建任务。"""
+        response = anon_client.post(f"{API_PREFIX}/tasks", json={"type": "refresh_source"})
+
+        assert response.status_code == 401
+        assert response.json()["code"] == "AUTH_REQUIRED"
+
+    def test_sse_needs_token(self, anon_client: TestClient) -> None:
+        assert anon_client.get(f"{API_PREFIX}/tasks/events").status_code == 401
+
+    def test_401_carries_www_authenticate(self, anon_client: TestClient) -> None:
+        response = anon_client.get(f"{API_PREFIX}/sources")
+
+        assert response.headers["WWW-Authenticate"] == 'Bearer realm="MoGrab"'
+
+    def test_wrong_token_rejected(self, anon_client: TestClient) -> None:
+        response = anon_client.get(
+            f"{API_PREFIX}/sources", headers={"Authorization": "Bearer not-the-token"}
+        )
+
+        assert response.status_code == 401
+
+    def test_token_prefix_is_not_enough(self, anon_client: TestClient, token: str) -> None:
+        """别把令牌截断了还能过 —— 比较必须是全长的。"""
+        response = anon_client.get(
+            f"{API_PREFIX}/sources", headers={"Authorization": f"Bearer {token[:10]}"}
+        )
+
+        assert response.status_code == 401
+
+    def test_wrong_scheme_rejected(self, anon_client: TestClient, token: str) -> None:
+        response = anon_client.get(
+            f"{API_PREFIX}/sources", headers={"Authorization": f"Basic {token}"}
+        )
+
+        assert response.status_code == 401
+
+    def test_valid_token_accepted(self, anon_client: TestClient, token: str) -> None:
+        response = anon_client.get(
+            f"{API_PREFIX}/sources", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert response.status_code == 200
+
+    def test_error_body_shape_is_consistent(self, anon_client: TestClient) -> None:
+        """401 也要走统一错误模型，客户端不该为它写特例。"""
+        body = anon_client.get(f"{API_PREFIX}/sources").json()
+
+        assert set(body) == {"code", "message", "details"}
+        assert body["details"]["scheme"] == "Bearer"
+
+    def test_openapi_declares_security(self, anon_client: TestClient) -> None:
+        schema = anon_client.get("/openapi.json").json()
+
+        assert schema["components"]["securitySchemes"]["MoGrabToken"]["scheme"] == "bearer"
+        assert schema["paths"][f"{API_PREFIX}/sources"]["get"]["security"] == [{"MoGrabToken": []}]
+        assert schema["paths"]["/health"]["get"].get("security") is None
 
 
 class TestAppStructure:

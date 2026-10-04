@@ -394,6 +394,7 @@ class ExportRecord:
 ```
 MoGrabError                       code: MOGRAB_ERROR
 ├── ConfigError                   CONFIG_ERROR
+├── AuthError                     AUTH_REQUIRED            仅 API 层使用
 ├── SourceError                   SOURCE_ERROR
 │   ├── SourceSchemaError         SOURCE_SCHEMA_ERROR      立即失败，不重试
 │   ├── SourceExecutionError      SOURCE_EXECUTION_ERROR   站点结构变化
@@ -429,8 +430,9 @@ MoGrabError                       code: MOGRAB_ERROR
 | `ParseError` | `False` |
 | `ContentValidationError` | `False` |
 | `SourceSchemaError` | `False` |
+| `AuthError` | `False` |
 
-### 7.2 错误 → API 响应
+### 8.2 错误 → API 响应
 
 ```json
 {
@@ -440,7 +442,11 @@ MoGrabError                       code: MOGRAB_ERROR
 }
 ```
 
-HTTP 状态码映射见 [`api-v1.md`](../api/api-v1.md) §6。
+HTTP 状态码映射见 [`api-v1.md`](../api/api-v1.md) §5.1。
+
+> 映射表靠 `isinstance` **顺序匹配**，取第一个命中的类型，所以子类必须排在
+> 父类前面（例如 `TaskParameterError` 在 `TaskError` 之前）。顺序错了不会报错，
+> 只是状态码静默变错 —— `tests/unit/test_error_mapping.py` 把这条规则钉住了。
 
 ---
 

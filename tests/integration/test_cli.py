@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mograb.config import get_paths, read_token
 from mograb_cli.main import app
 
 pytestmark = pytest.mark.integration
@@ -264,6 +265,21 @@ class TestTaskCommands:
         assert result.exit_code == 1
         assert "没在运行" in result.stdout
 
+    def test_unauthorized_explains(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """令牌对不上也要给人话 —— 正常不会发生，但真撞上要能自己查。"""
+        from mograb_cli.commands import task as task_module
+        from mograb_cli.commands._api import ApiUnauthorized
+
+        async def fake_request(*args: object, **kwargs: object) -> object:
+            raise ApiUnauthorized("unauthorized")
+
+        monkeypatch.setattr(task_module, "request", fake_request)
+
+        result = run("task", "pause", "whatever")
+
+        assert result.exit_code == 1
+        assert "令牌" in result.stdout
+
 
 class TestServerCommands:
     def test_status_when_down(self) -> None:
@@ -274,6 +290,35 @@ class TestServerCommands:
     def test_status_json(self) -> None:
         data = json.loads(run("server", "status", "--json").stdout)
         assert data["running"] is False
+
+
+class TestServerToken:
+    """``mog server token`` —— 给手工调接口用的。"""
+
+    def test_prints_token(self) -> None:
+        result = run("server", "token")
+
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines[0]) == 43
+
+    def test_matches_file(self) -> None:
+        """打印出来的必须就是文件里那份 —— 不然手工调接口会 401。"""
+        printed = run("server", "token").stdout.strip().splitlines()[0]
+
+        assert read_token(get_paths()) == printed
+
+    def test_json_shape(self) -> None:
+        data = json.loads(run("server", "token", "--json").stdout)
+
+        assert set(data) == {"token", "path"}
+        assert Path(data["path"]) == get_paths().token_file
+
+    def test_is_stable_across_calls(self) -> None:
+        first = run("server", "token").stdout.strip().splitlines()[0]
+        second = run("server", "token").stdout.strip().splitlines()[0]
+
+        assert first == second
 
 
 class TestTopLevel:

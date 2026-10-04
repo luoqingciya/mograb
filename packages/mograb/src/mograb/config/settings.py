@@ -39,6 +39,14 @@ class ServerSettings(BaseModel):
     port: int = Field(default=48721, ge=1024, le=65535)
     health_timeout_ms: int = Field(default=5000, ge=100)
 
+    auth: bool = True
+    """是否要求 ``Authorization: Bearer <token>``。
+
+    默认开着。关掉只在两种场景下说得通：临时调试，或者把 API 挂在
+    别的鉴权层后面。**监听回环不构成关闭的理由** —— 浏览器里的任意页面
+    都能往 ``127.0.0.1`` 发请求，CORS 挡不住副作用。
+    """
+
 
 class DownloadSettings(BaseModel):
     """下载配置（§35、§38）。"""
@@ -193,6 +201,9 @@ DEFAULT_CONFIG_TOML = """\
 [server]
 host = "127.0.0.1"
 port = 48721
+# 要求 Authorization: Bearer <token>。令牌在 data/token 里，
+# 由程序自动生成，不需要在这里填。
+auth = true
 
 [download]
 concurrency = 4

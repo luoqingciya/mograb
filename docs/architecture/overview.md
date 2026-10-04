@@ -157,6 +157,20 @@ Source    不许执行任意代码
 | Parser 不决定任务 | `extract_*` 是纯函数，没有副作用 |
 | Desktop 不碰 DB | Electron 只能通过 HTTP 访问 API |
 | 领域层不依赖基础设施 | `mograb.domain` 只 import pydantic 和标准库 |
+| 本机其他进程不碰 API | 每个业务请求都要 `Authorization: Bearer <token>` |
+
+### 为什么本机请求也要鉴权
+
+API 只监听 `127.0.0.1`，直觉上「只有本机能访问 = 安全」。**这个直觉是错的。**
+
+浏览器里的任意页面都能向 `127.0.0.1:48721` 发请求，而且简单请求
+（表单编码、`text/plain`）连 CORS 预检都不触发。CORS 约束的是
+**能不能读到响应**，不是**请求会不会送达** —— 所以用户随手打开一个恶意网页，
+那个页面就能让 MoGrab 开始下载、删书源、建导出任务。
+
+令牌是主要防线（简单请求带不了 `Authorization` 头），CORS 是第二道。
+令牌自动生成在 `data/token`，CLI 和 Desktop 各自读它。
+细节见 [ADR-0004](decisions/ADR-0004-local-api-auth.md)。
 
 ## 数据流
 
@@ -317,5 +331,6 @@ Electron 界面放到最后。UI 是最容易看到成果的部分，但也是�
 - [Domain Model v1](../domain-model/domain-model-v1.md)
 - [Storage v1](../storage/storage-v1.md)
 - [API v1](../api/api-v1.md)
+- [架构决策记录](decisions/README.md)
 - [规划评估报告](../evaluation/规划评估报告.md)
 - [ADR](decisions/)

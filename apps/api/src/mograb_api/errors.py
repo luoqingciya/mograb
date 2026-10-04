@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from mograb.errors import (
+    AuthError,
     ContentValidationError,
     EntityNotFoundError,
     ExportError,
@@ -37,6 +38,7 @@ from mograb.errors import (
 # 顺序有意义：先匹配到子类。TaskParameterError 必须排在 TaskError 前面，
 # 否则会被后者拦成 409。
 _STATUS_MAP: tuple[tuple[type[MoGrabError], int], ...] = (
+    (AuthError, 401),
     (EntityNotFoundError, 404),
     (SourceNotFoundError, 404),
     (TaskNotFoundError, 404),
@@ -65,7 +67,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(MoGrabError)
     async def _handle_mograb_error(_request: Request, exc: MoGrabError) -> JSONResponse:
-        return JSONResponse(status_code=status_for(exc), content=exc.to_dict())
+        headers = {}
+        if isinstance(exc, AuthError):
+            # RFC 9110 要求 401 带 WWW-Authenticate，客户端据此知道该用哪种方案
+            headers["WWW-Authenticate"] = 'Bearer realm="MoGrab"'
+        return JSONResponse(
+            status_code=status_for(exc), content=exc.to_dict(), headers=headers or None
+        )
 
     @app.exception_handler(ValueError)
     async def _handle_value_error(_request: Request, exc: ValueError) -> JSONResponse:

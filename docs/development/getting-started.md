@@ -122,8 +122,19 @@ uv run mog config path
 
 # API
 uv run mograb-api                              # 启动（127.0.0.1:48721）
+uv run mog server token                        # 打印访问令牌（手工 curl 用）
 uv run python -c "from mograb_api.main import create_app; print(len(create_app().openapi()['paths']))"
 ```
+
+接口都要求 `Authorization: Bearer <token>`，令牌在 `data/token`，首次启动时
+自动生成。CLI 和 Desktop 会自己读，平时不用管；只有手工调接口才需要：
+
+```bash
+TOKEN=$(uv run mog server token)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48721/api/v1/sources
+```
+
+浏览器里打开 `http://127.0.0.1:48721/docs` 不需要令牌，可以直接看接口文档。
 
 ---
 

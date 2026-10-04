@@ -27,6 +27,7 @@ MoGrab 的规划书在多处「给出选项但未做选择」。这些悬而未�
 | [ADR-0001](ADR-0001-monorepo-layout.md) | Monorepo 布局与包划分 | 已接受 | P0-01 |
 | [ADR-0002](ADR-0002-source-version-fields.md) | 书源版本字段拆分 | 已接受 | P0-02 |
 | [ADR-0003](ADR-0003-parser-and-epub-deps.md) | 解析器与 EPUB 依赖选型 | 已接受 | P2-04、P2-05 |
+| [ADR-0004](ADR-0004-local-api-auth.md) | 本地 API 的鉴权方式 | 已接受 | P2-02 |
 
 ## 模板
 

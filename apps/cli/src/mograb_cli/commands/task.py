@@ -12,7 +12,13 @@ import typer
 from mograb.domain.enums import TaskStatus
 from mograb.errors import EntityNotFoundError
 
-from ._api import ApiUnavailable, explain_unavailable, request
+from ._api import (
+    ApiUnauthorized,
+    ApiUnavailable,
+    explain_unauthorized,
+    explain_unavailable,
+    request,
+)
 from ._common import command, console, emit, open_app
 
 app = typer.Typer(no_args_is_help=True, help="任务控制")
@@ -152,6 +158,9 @@ async def _control(action: str, task_id: str) -> dict:
         return await request(settings, "POST", f"/tasks/{task_id}/{action}")
     except ApiUnavailable:
         explain_unavailable(settings)
+        raise typer.Exit(code=1) from None
+    except ApiUnauthorized:
+        explain_unauthorized()
         raise typer.Exit(code=1) from None
 
 

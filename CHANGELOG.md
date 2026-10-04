@@ -75,7 +75,7 @@
 - `apps/api` —— FastAPI，22 个端点挂在 `/api/v1` 下，全部接线完成。
   统一错误模型；SSE 事件流（除规划书要求的单任务流外，另加了全局流，
   桌面端任务页要用）；CORS 收紧到只允许本机来源。任务走 worker 池 + 队列，
-  支持暂停/继续/取消。
+  支持暂停/继续/取消。**所有业务端点要求 Bearer 令牌**，见下面的「修复」。
 
 - `apps/desktop` —— Electron + TypeScript。最小闭环已跑通：
   搜索 → 点下载 → 看任务进度（SSE 实时推）。书架 / 书源管理 / 设置还是占位页。
@@ -83,6 +83,9 @@
   构建用 tsc 不引打包器 —— 渲染层走原生 ES modules，编译完 Electron 直接加载。
   主进程 CommonJS、渲染层 ESM，所以有两份 tsconfig。开了 `contextIsolation`、
   `sandbox`，关了 `nodeIntegration`，CSP 只放行本地 API。
+
+  后端以 sidecar 方式拉起；令牌由主进程读好后经 preload 递给渲染进程。
+  SSE 用 fetch 读流而不是 `EventSource`（后者设不了请求头）。
 
 ### 装配
 
@@ -110,9 +113,27 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`、
   `scripts/check_docs.py`。
-- 482 个测试，覆盖率 84%，门槛设在 70%。
+- 528 个测试，覆盖率 85%，门槛设在 70%。桌面端另有 14 个（`npm test`）。
 
 ### 修复
+
+**API 补上鉴权。** 之前只有 CORS。回环地址不构成信任边界 —— 浏览器里的
+任意页面都能向 `127.0.0.1:48721` 发请求，而且简单请求（表单编码、
+`text/plain`）连预检都不触发，CORS 只约束能不能**读响应**。也就是说，
+用户随手打开一个恶意网页，那个页面就能让 MoGrab 下载、删书源、建任务。
+
+现在所有业务端点都要求 `Authorization: Bearer <token>`：
+
+- 令牌首次使用时生成在 `data/token`（POSIX 0600），之后复用。
+  **不放 `config.toml`** —— 那个文件会被备份、被贴进 issue、在机器之间拷贝
+- 生成用 `secrets.token_urlsafe(32)`，比较用 `secrets.compare_digest`
+- 只认 `Authorization` 头，不做 `?token=` 查询参数 —— 后者会让令牌进访问日志
+- `/health`、`/docs`、`/openapi.json` 保持开放
+- 新增 `mog server token` 打印令牌（手工 curl 用）
+- 新增 `AuthError`（`AUTH_REQUIRED`）→ 401，带 `WWW-Authenticate`
+
+代价是桌面端的 SSE 从 `EventSource` 换成了 fetch 流式读取 ——
+`EventSource` 设不了请求头。见 [ADR-0004](docs/architecture/decisions/ADR-0004-local-api-auth.md)。
 
 **建任务时校验引用的实体。** `tasks.book_id` 上有外键，但 `POST /api/v1/tasks`
 传一个不存在的 `book_id` 时，插入抛的是裸的 `IntegrityError` —— 到客户端
@@ -127,6 +148,12 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 新增 `TaskParameterError`，和 `InvalidTaskTransitionError` 分开 ——
 后者是「和资源当前状态冲突」（409），前者是「请求本身没说清楚」（400）。
+
+**桌面端视图的创建时机。** 视图一被创建就会发请求，而原先 `bootstrap()`
+是先建视图、再等后端地址。搜索结果页创建时不发请求，所以一直没暴露；
+任务页创建时立刻订阅 SSE，于是把相对路径解析成了 `file:///D:/tasks/events`，
+被 CSP 拦下。现在改成「拿到后端地址之后才建视图」，启动期间显示占位内容。
+
 
 ### 相对原规划书的改动
 
@@ -149,11 +176,11 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 ### 还没做
 
-完整清单和优先级在 [docs/progress.md](docs/progress.md)。最要紧的一条：
+完整清单和优先级在 [docs/progress.md](docs/progress.md)。最要紧的两条：
 
-- API 没有认证，只有 CORS。**v0.4.0 之前必须补上随机 token**
-
-桌面端还剩书架、书源管理、设置三个页面；架构已验证，照着补即可。
+- **所有测试都是离线的**，没在真实站点上跑过完整下载。接口之间对得上，
+  但真实站点的编码、反爬、目录结构差异都还没遇到过
+- 桌面端还剩书架、书源管理、设置三个页面；架构已验证，照着补即可
 
 ## 版本规划
 
