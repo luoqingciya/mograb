@@ -78,6 +78,7 @@ def make_book(book_id: str = "book_1", **overrides) -> Book:
         "id": book_id,
         "source_id": "example",
         "source_book_id": "1001",
+        "url": "https://example.com/book/1001",
         "title": "三体",
         "author": "刘慈欣",
         "intro": "简介",

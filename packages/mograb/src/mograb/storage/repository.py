@@ -80,6 +80,14 @@ class ChapterRepository(Protocol):
 
     async def list_identities(self, book_id: str) -> list[tuple[str, str]]: ...
 
+    async def stats_by_book(self, book_id: str) -> tuple[int, int]:
+        """返回 ``(章节数, 总字数)``。
+
+        单独开一个方法是因为更新书籍统计时不该把全部正文读进内存 ——
+        一本几千章的书，只为数个数就把几十兆正文捞出来太浪费。
+        """
+        ...
+
     async def save(self, chapter: Chapter) -> None: ...
 
     async def save_many(self, chapters: list[Chapter]) -> None: ...

@@ -41,6 +41,11 @@
 - `task` —— 队列、Worker 池、生命周期管理。`TaskManager.start()` 会先把
   上次进程崩溃留下的 RUNNING / RETRYING 任务标成 FAILED，而不是让它们
   在界面上永远转圈。增量更新用 `compute_chapter_diff` 这个纯函数算。
+
+  下载编排（`DownloadScheduler`）按 §18 的顺序走：
+  抓目录 → 和本地比 → 并发下载 → 清洗校验 → 单事务落库 → 刷新统计 → 可选导出。
+  单章失败只记进报告，不中断整本书；并发度受书源自己的 `network.concurrency`
+  约束，防止一本三千章的书一次性铺开。进度通过回调抛出去，给后面的 SSE 用。
 - `storage` —— SQLAlchemy 2.0 映射 8 张表，7 个仓储实现，SQLite 开了 WAL。
   书源仓储把定义放磁盘、把本机记账放数据库，索引能从磁盘重建；
   HTTP 缓存实现三层失效（TTL / 显式 / 容量），容量满了按最久未访问淘汰。
@@ -81,7 +86,7 @@
 - GitHub Actions：CI（lint / 类型检查 / 测试矩阵 / 书源校验 / 构建），
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`。
-- 282 个测试，覆盖率 85%，门槛设在 70%。
+- 375 个测试，覆盖率 87%，门槛设在 70%。
 
 ### 相对原规划书的改动
 
@@ -104,7 +109,7 @@
 
 ### 还没做
 
-- `DownloadScheduler.run()` 和 `plan_update()` 没接线
+- CLI 和 API 的业务接线
 - CLI 除了 `source lint`、`config`，API 除了 `/health`，其余都是骨架
 - API 没有认证，只有 CORS
 - `.mgs` 打包格式没做

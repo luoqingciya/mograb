@@ -22,6 +22,7 @@ from .enums import (
     can_transition,
 )
 from .export import ExportRecord
+from .ids import new_id, new_ulid
 from .source import (
     SPEC_VERSION,
     BookSpec,
@@ -79,5 +80,7 @@ __all__ = [
     "TransformOp",
     "can_transition",
     "compute_content_hash",
+    "new_id",
+    "new_ulid",
     "normalize_url",
 ]

@@ -6,13 +6,24 @@
 
 from .manager import TaskManager, TaskRepository
 from .queue import TaskQueue
-from .scheduler import ChapterDiff, DownloadPlan, DownloadScheduler, compute_chapter_diff
+from .scheduler import (
+    ChapterDiff,
+    ChapterFailure,
+    DownloadPlan,
+    DownloadReport,
+    DownloadScheduler,
+    ProgressCallback,
+    compute_chapter_diff,
+)
 from .worker import TaskHandler, WorkerPool
 
 __all__ = [
     "ChapterDiff",
+    "ChapterFailure",
     "DownloadPlan",
+    "DownloadReport",
     "DownloadScheduler",
+    "ProgressCallback",
     "TaskHandler",
     "TaskManager",
     "TaskQueue",

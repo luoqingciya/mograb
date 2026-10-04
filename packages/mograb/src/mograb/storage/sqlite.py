@@ -203,6 +203,19 @@ class SqliteChapterRepository:
             )
             return [(k, h or "") for k, h in (await session.execute(stmt)).all()]
 
+    async def stats_by_book(self, book_id: str) -> tuple[int, int]:
+        """返回 ``(章节数, 总字数)``。一次聚合查询，不读正文。"""
+        async with self._db.session() as session:
+            count, words = (
+                await session.execute(
+                    select(
+                        func.count(ChapterRow.id),
+                        func.coalesce(func.sum(ChapterRow.word_count), 0),
+                    ).where(ChapterRow.book_id == book_id)
+                )
+            ).one()
+        return int(count), int(words)
+
     async def save(self, chapter: Chapter) -> None:
         async with self._db.transaction() as session:
             await _upsert_chapter(session, chapter)
@@ -712,6 +725,7 @@ def _to_book(row: BookRow) -> Book:
         id=row.id,
         source_id=row.source_id,
         source_book_id=row.source_book_id,
+        url=row.url,
         title=row.title,
         author=row.author,
         intro=row.intro,
@@ -738,6 +752,7 @@ def _to_book_row(book: Book) -> BookRow:
 def _apply_book(book: Book, row: BookRow) -> None:
     row.source_id = book.source_id
     row.source_book_id = book.source_book_id
+    row.url = book.url
     row.title = book.title
     row.author = book.author
     row.intro = book.intro

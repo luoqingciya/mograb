@@ -32,6 +32,15 @@
 理由：来源站 ID 可能变更、可能跨站冲突、可能为 URL 形式。
 若作为主键，站点改版会导致本地数据失效。
 
+内部 ID 是 ULID（`mograb.domain.ids`）。选它而不是 `uuid4` 的原因：
+前 48 位是毫秒时间戳，所以**按 ID 排序就等于按创建时间排序** ——
+排查问题时看一串 ID 就能看出先后，不用再去 join 时间字段。
+编码用 Crockford Base32（去掉了 I / L / O / U），26 个字符，
+复制粘贴和口头念都不容易错。
+
+带类型前缀的写法是 `new_id("book")` → `book_01J8X2QK...`，
+前缀是为了看日志和翻数据库时一眼能认出对象类型。
+
 ### 1.3 严格模式
 
 所有领域模型使用 `extra="forbid"`。未知字段导致校验失败，
@@ -110,6 +119,9 @@ class Book:
     source_id: str
     source_book_id: str  # 来源站标识
 
+    # --- 来源位置 ---
+    url: str  # 详情页 URL，抓目录和更新都要用
+
     # --- 元数据（书源提供）---
     title: str
     author: str | None
@@ -145,14 +157,19 @@ class Book:
 | 类别 | 字段 | 谁能写 |
 |------|------|-------|
 | 书源元数据 | `title` `author` `intro` `language` `cover_url` `status` `latest_chapter` | Source Engine |
+| 来源位置 | `url` | Source Engine（登记时写入，之后不改） |
 | 派生统计 | `word_count` `chapter_count` `cover_path` | Content / Storage 层 |
 | 系统字段 | `id` `created_at` `updated_at` | Storage 层 |
 
 书源**不得**写入派生统计字段。`metadata` 用于承载书源自定义的附加字段，
 不得用于承载核心语义。
 
+`url` 是必须的：书源里的 `chapters.request.url` 写的是 `{{book.url}}`，
+没有它就没法抓目录，也没法做增量更新。`source_book_id` 不能顶替 ——
+书源给了 `id` 字段时它是个站内编号（比如 `1001`），不是 URL。
+
 > 相对规划书 §6.2 的补全：`language` / `word_count` / `chapter_count` / `cover_path`。
-> 详见评估报告 P1-04。
+> 详见评估报告 P1-04。`url` 是实现调度器时发现缺的。
 
 ### 3.3 BookStatus
 

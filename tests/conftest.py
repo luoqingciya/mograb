@@ -63,6 +63,7 @@ def sample_book(now: datetime) -> Book:
         id="book_test0001",
         source_id="example",
         source_book_id="1001",
+        url="https://example.com/book/1001",
         title="三体",
         author="刘慈欣",
         intro="文化大革命如火如荼进行的同时……",

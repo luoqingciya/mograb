@@ -76,6 +76,7 @@ class BookRow(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"), index=True)
     source_book_id: Mapped[str] = mapped_column(String(256), index=True)
+    url: Mapped[str] = mapped_column(String(1024), default="")
 
     title: Mapped[str] = mapped_column(String(512), index=True)
     author: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)

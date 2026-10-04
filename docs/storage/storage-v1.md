@@ -107,6 +107,7 @@ settings     （键值）
 | `id` | TEXT | PK | MoGrab 内部 ID |
 | `source_id` | TEXT | FK → sources.id, INDEX | |
 | `source_book_id` | TEXT | NOT NULL, INDEX | 来源站 ID |
+| `url` | TEXT | NOT NULL | 详情页 URL，抓目录要用 |
 | `title` | TEXT | NOT NULL, INDEX | |
 | `author` | TEXT | INDEX | |
 | `intro` | TEXT | | |

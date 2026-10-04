@@ -32,6 +32,9 @@ class Book(BaseModel):
     source_id: str = Field(description="来源书源 ID")
     source_book_id: str = Field(description="来源站自身的书籍标识")
 
+    # --- 来源位置 ---
+    url: str = Field(description="书籍详情页 URL。抓目录和更新都要用它（书源里的 {{book.url}}）")
+
     # --- 元数据 ---
     title: str
     author: str | None = None
