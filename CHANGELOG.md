@@ -74,7 +74,7 @@
 - GitHub Actions：CI（lint / 类型检查 / 测试矩阵 / 书源校验 / 构建），
   Release（PyInstaller onedir + Electron + SHA256SUMS）。
 - `scripts/version.py`、`scripts/build.py`、`scripts/release.py`。
-- 176 个测试，覆盖率门槛 70%。
+- 282 个测试，覆盖率 85%，门槛设在 70%。
 
 ### 相对原规划书的改动
 

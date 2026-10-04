@@ -87,6 +87,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+也可以在 Actions 页面手动跑（选 Release → Run workflow），填版本号即可。
+手动触发同样会校验版本号与 `VERSION` 文件是否一致，所以适合拿来做预演 ——
+但注意它最后也会建一个 draft release，预演完记得删掉。
+
 ### 3.3 流水线
 
 ```
@@ -112,6 +116,10 @@ GitHub Release（draft）
 | `MoGrab-Setup-v0.1.0-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
 | `MoGrab-CLI-v0.1.0-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
+
+桌面端的两个产物暂时还产不出来 —— `apps/desktop` 只有占位骨架，没有
+`package-lock.json`。工作流会检测这个文件，缺了就跳过桌面端那一路并打一条
+warning，等桌面端真正做起来（`npm install` 生成 lockfile 并提交）会自动生效。
 
 ### 3.5 打包原则（§57.1、§57.2）
 

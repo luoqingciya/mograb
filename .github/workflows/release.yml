@@ -2,13 +2,16 @@
 #
 # MoGrab Release —— 对应规划书 §57.6、§57.7。
 #
-# 触发：推送 v* tag
-# 流程：Checkout → Setup → uv sync --locked → Lint → Type Check → Test
-#       → Build CLI (PyInstaller onedir) → Build Desktop Backend
-#       → Build Electron → ZIP → NSIS → SHA256SUMS.txt → GitHub Release
+# 触发方式：
+#   1. 推 v* tag（正式发版）
+#   2. 手动触发（预演，需要填版本号）
 #
-# 说明：CLI 采用 PyInstaller **onedir**（非单文件），见 §57.2。
-#       最终产物不含 uv / Python / Node.js（§57.1）。
+# 流程：Verify → 三路并行打包 → SHA256SUMS → GitHub Release（draft）
+#
+# 打包说明（§57.1、§57.2）：
+#   - CLI 用 PyInstaller onedir，不追求单文件 EXE
+#   - 最终产物不含 uv / Python / Node.js
+#   - 桌面端在 apps/desktop 有 package-lock.json 之前会跳过
 
 name: Release
 
@@ -18,14 +21,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号（不含 v 前缀），例如 0.1.0"
+        description: "版本号（不含 v 前缀），必须与 VERSION 文件一致，例如 0.1.0"
         required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
   PYTHONUNBUFFERED: "1"
+  # tag 触发时取 tag 名，手动触发时取输入；后面的步骤会去掉 v 前缀
+  RAW_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -35,10 +41,10 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -49,16 +55,15 @@ jobs:
         run: uv sync --locked --all-packages
 
       # tag 名必须和 VERSION 文件一致，否则产物名和包内版本会对不上
-      - name: Check tag matches VERSION
+      - name: Check version matches VERSION file
         shell: bash
         run: |
-          tag_version="${GITHUB_REF_NAME#v}"
+          version="${RAW_VERSION#v}"
           file_version="$(uv run python scripts/version.py show)"
-          echo "tag  = $tag_version"
-          echo "VERSION = $file_version"
-          if [ "$tag_version" != "$file_version" ]; then
-            echo "::error::tag ($tag_version) 与 VERSION 文件 ($file_version) 不一致"
-            echo "先把 VERSION 改成 $tag_version 并提交，再重新打 tag"
+          echo "本次发布版本 = $version"
+          echo "VERSION 文件   = $file_version"
+          if [ "$version" != "$file_version" ]; then
+            echo "::error::版本不一致。先把 VERSION 改成 $version 并提交，再重新打 tag"
             exit 1
           fi
 
@@ -85,10 +90,10 @@ jobs:
     needs: verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -98,19 +103,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-packages --group build
 
-      - name: Build CLI (PyInstaller onedir)
+      - name: Build CLI
         shell: bash
-        run: uv run python scripts/build.py cli --version "${GITHUB_REF_NAME#v}"
+        run: uv run python scripts/build.py cli --version "${RAW_VERSION#v}"
 
       - name: Create ZIP
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $name = "MoGrab-CLI-v$version-win-x64"
-          Compress-Archive -Path "release-artifacts/MoGrab-CLI/*" -DestinationPath "$name.zip"
+          $version = $env:RAW_VERSION -replace '^v', ''
+          Compress-Archive -Path "release-artifacts/MoGrab-CLI/*" `
+                           -DestinationPath "MoGrab-CLI-v$version-win-x64.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cli-windows
           path: MoGrab-CLI-*.zip
@@ -118,44 +123,68 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Windows Desktop（后端 sidecar + Electron → ZIP + NSIS）
+  #
+  # apps/desktop 目前只有占位骨架，没有 package-lock.json。
+  # 检测到 lockfile 缺失就跳过，等桌面端真正做起来再自动生效。
   # ---------------------------------------------------------------------------
   build-desktop-windows:
     name: Build Desktop (Windows x64)
     needs: verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Check for Electron lockfile
+        id: lockfile
+        shell: bash
+        run: |
+          if [ -f apps/desktop/package-lock.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::apps/desktop 没有 package-lock.json，跳过桌面端构建"
+          fi
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        if: steps.lockfile.outputs.ready == 'true'
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
       - name: Set up Python
+        if: steps.lockfile.outputs.ready == 'true'
         run: uv python install 3.12
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        if: steps.lockfile.outputs.ready == 'true'
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Install Python dependencies
+        if: steps.lockfile.outputs.ready == 'true'
         run: uv sync --locked --all-packages --group build
 
       - name: Build Desktop backend (sidecar)
+        if: steps.lockfile.outputs.ready == 'true'
         shell: bash
-        run: uv run python scripts/build.py backend --version "${GITHUB_REF_NAME#v}"
+        run: uv run python scripts/build.py backend --version "${RAW_VERSION#v}"
 
       - name: Install Electron dependencies
+        if: steps.lockfile.outputs.ready == 'true'
         working-directory: apps/desktop
         run: npm ci
 
       - name: Build Electron app (ZIP + NSIS)
+        if: steps.lockfile.outputs.ready == 'true'
         working-directory: apps/desktop
         run: npx electron-builder --win --publish never
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        if: steps.lockfile.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-windows
           path: |
@@ -171,10 +200,10 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -184,33 +213,40 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-packages --group build
 
-      - name: Build CLI (PyInstaller onedir)
-        run: uv run python scripts/build.py cli --version "${GITHUB_REF_NAME#v}"
+      - name: Build CLI
+        run: uv run python scripts/build.py cli --version "${RAW_VERSION#v}"
 
       - name: Create tar.gz
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RAW_VERSION#v}"
           tar -czf "MoGrab-CLI-v${version}-linux-x64.tar.gz" -C release-artifacts MoGrab-CLI
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cli-linux
           path: MoGrab-CLI-*.tar.gz
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # 汇总产物 + 生成校验和 + 创建 Release
+  # 汇总产物 + 校验和 + 创建 Release
   # ---------------------------------------------------------------------------
   release:
     name: Create GitHub Release
     needs: [build-cli-windows, build-desktop-windows, build-cli-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # tag 触发时 RAW_VERSION 形如 v0.1.0，手动触发时是用户填的 0.1.0。
+      # 统一在这里去掉 v 前缀，后面拼 tag 名和产物名都用这个值。
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: echo "value=${RAW_VERSION#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -225,8 +261,8 @@ jobs:
         id: notes
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          # 提取 CHANGELOG 中对应版本段落（## [x.y.z] 到下一个 ## 之间）
+          version="${{ steps.version.outputs.value }}"
+          # 取 CHANGELOG 里对应版本的段落（## [x.y.z] 到下一个 ## 之间）
           awk -v ver="$version" '
             $0 ~ "^## \\[?" ver "\\]?" {flag=1; next}
             flag && /^## / {exit}
@@ -235,10 +271,14 @@ jobs:
           if [ ! -s release-notes.md ]; then
             echo "Release ${version}" > release-notes.md
           fi
+          echo "----- 发布说明 -----"
+          cat release-notes.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: v${{ steps.version.outputs.value }}
           body_path: release-notes.md
           files: |
             artifacts/*.zip
