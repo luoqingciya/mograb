@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -87,12 +88,16 @@ class Fetcher(Protocol):
         method: str,
         url: str,
         *,
+        source_id: str = ...,
         headers: dict[str, str] | None = ...,
         params: dict[str, str] | None = ...,
         data: object = ...,
         cookies: dict[str, str] | None = ...,
         encoding: str | None = ...,
         timeout_ms: int | None = ...,
+        allowed_domains: Collection[str] | None = ...,
+        concurrency: int | None = ...,
+        min_interval: float | None = ...,
     ) -> ResponseLike: ...
 
 
@@ -259,12 +264,18 @@ class SourceEngine:
         response = await self._fetcher.fetch(
             request.method,
             request.url,
+            source_id=source.id,
             headers=request.headers,
             params=request.params,
             data=request.data,
             cookies=request.cookies,
             encoding=request.encoding,
             timeout_ms=request.timeout_ms or source.network.timeout_ms,
+            # 书源声明能访问哪些域名，运行时就得真的只能访问这些
+            allowed_domains=source.permissions.network,
+            # 限速也照书源自己声明的来，而不是用全局默认值
+            concurrency=source.network.concurrency,
+            min_interval=source.network.request_interval_ms / 1000,
         )
         return Document(
             raw=response.content,

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..domain.enums import TaskStatus, TaskType
 from ..domain.task import Task
@@ -100,6 +100,7 @@ class TaskManager:
         priority: int = 0,
         total: int = 0,
         max_retries: int = 3,
+        params: dict[str, Any] | None = None,
         enqueue: bool = True,
     ) -> Task:
         """创建任务（可选立即入队）。"""
@@ -111,6 +112,7 @@ class TaskManager:
             priority=priority,
             total=total,
             max_retries=max_retries,
+            params=dict(params or {}),
             created_at=_now(),
         )
         await self._repo.save(task)

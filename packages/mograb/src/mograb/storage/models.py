@@ -150,6 +150,7 @@ class TaskRow(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
     resume_cursor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

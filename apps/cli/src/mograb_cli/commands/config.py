@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import typer
 
-from mograb.config import get_paths, runtime_dir, write_default_config
+from mograb.config import get_paths, load_settings, runtime_dir, write_default_config
 
 from ._common import console, emit
 
@@ -39,17 +39,36 @@ def show_path(
         "logs": str(paths.logs_dir),
         "sources": str(paths.sources_dir),
     }
+    emit(data, json_output=json_output)
     if json_output:
-        emit(data, json_output=True)
         return
     for key, value in data.items():
         console.print(f"[bold]{key:10s}[/bold] {value}")
 
 
 @app.command("show")
-def show() -> None:
-    """显示当前生效配置。"""
-    raise NotImplementedError("config show 待 load_settings 接入后实现")
+def show(
+    json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),
+) -> None:
+    """显示当前生效的配置（含环境变量覆盖的结果）。"""
+    settings = load_settings()
+    data = settings.model_dump(mode="json")
+    # 派生值单独补上，配置里写的是 "5GB" 这种给人看的写法
+    data["cache"]["max_size_bytes"] = settings.cache.max_size_bytes
+
+    emit(data, json_output=json_output)
+    if json_output:
+        return
+
+    from rich.table import Table
+
+    for section, values in data.items():
+        table = Table(title=section, title_justify="left", show_header=False, box=None)
+        table.add_column(style="bold", width=22)
+        table.add_column()
+        for key, value in values.items():
+            table.add_row(key, str(value))
+        console.print(table)
 
 
 __all__ = ["app"]

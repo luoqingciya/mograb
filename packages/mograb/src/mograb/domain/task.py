@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,6 +63,12 @@ class Task(BaseModel):
 
     # --- 恢复点（进程崩溃后续跑）---
     resume_cursor: int | None = Field(default=None, description="已处理到的章节序号，用于断点续传")
+
+    # --- 任务参数 ---
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="任务专属参数，比如导出任务的 format / target。只放执行细节，不放核心语义。",
+    )
 
     # --- 错误 ---
     error_code: str | None = None

@@ -54,6 +54,39 @@ class DownloadSettings(BaseModel):
     timeout_ms: int = Field(default=15_000, ge=100, le=120_000)
 
 
+# 按单位长度从长到短排 —— 否则 "512mb" 会先匹配到 "b"
+_SIZE_UNITS: tuple[tuple[str, int], ...] = (
+    ("tb", 1024**4),
+    ("gb", 1024**3),
+    ("mb", 1024**2),
+    ("kb", 1024),
+    ("b", 1),
+)
+
+
+def parse_size(text: str) -> int:
+    """把 ``"5GB"`` 这类写法解析成字节数。
+
+    只接受整数加单位（大小写不敏感），不接受 ``5.5GB`` 这种 ——
+    配置里写小数没有实际意义，限制住反而少一类出错可能。
+    """
+    raw = text.strip().lower()
+    if not raw:
+        raise ConfigError("容量配置不能为空")
+
+    unit = next((u for u, _ in _SIZE_UNITS if raw.endswith(u)), None)
+    if unit is None:
+        number, factor = raw, 1
+    else:
+        number, factor = raw[: -len(unit)].strip(), dict(_SIZE_UNITS)[unit]
+
+    if not number.isdigit():
+        raise ConfigError(
+            f"无法解析容量: {text!r}", details={"value": text, "expected": "如 5GB、512MB"}
+        )
+    return int(number) * factor
+
+
 class CacheSettings(BaseModel):
     """缓存配置（§16、§35）。"""
 
@@ -65,6 +98,11 @@ class CacheSettings(BaseModel):
 
     ttl_seconds: int = Field(default=1800, ge=0)
     content_ttl_seconds: int = Field(default=7 * 24 * 3600, ge=0)
+
+    @property
+    def max_size_bytes(self) -> int:
+        """``max_size`` 的字节表示。"""
+        return parse_size(self.max_size)
 
 
 class OutputSettings(BaseModel):
@@ -189,5 +227,6 @@ __all__ = [
     "OutputSettings",
     "ServerSettings",
     "load_settings",
+    "parse_size",
     "write_default_config",
 ]

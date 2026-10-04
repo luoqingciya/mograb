@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -139,14 +140,25 @@ class HttpClient:
         timeout_ms: int | None = None,
         use_cache: bool = True,
         ttl_seconds: int | None = None,
+        allowed_domains: Collection[str] | None = None,
+        concurrency: int | None = None,
+        min_interval: float | None = None,
     ) -> HttpResult:
         """执行请求，自动应用缓存 / 限流 / 重试。
+
+        Args:
+            allowed_domains: 本次请求允许访问的域名。书源执行时会传自己的
+                ``permissions.network``，这样「书源声明了什么就只能访问什么」
+                在运行时真的成立，而不只是靠 linter 静态检查。
+            concurrency: 该来源的并发上限。首次为该来源建限流器时生效，
+                之后沿用。不传则用注册表的默认值。
+            min_interval: 该来源两次请求之间的最小间隔（秒）。
 
         Raises:
             NetworkError: 网络层失败（可重试子类由 RetryPolicy 处理）。
             HttpStatusError: 非 2xx。
         """
-        self._assert_domain_allowed(url, source_id)
+        self._assert_domain_allowed(url, source_id, allowed_domains)
 
         cache_key: str | None = None
         if use_cache and self._cache is not None:
@@ -173,6 +185,8 @@ class HttpClient:
             cookies=cookies,
             encoding=encoding,
             timeout_ms=timeout_ms,
+            concurrency=concurrency,
+            min_interval=min_interval,
         )
 
         if cache_key is not None and self._cache is not None and result.status_code == 200:
@@ -197,7 +211,12 @@ class HttpClient:
         """带重试的请求执行。"""
         source_id = kwargs.get("source_id", "unknown")
         policy: RetryPolicy = self._config.retry
-        limiter = await self._limiters.get(source_id)
+        # 限流器按来源缓存，所以第一次请求带过来的策略会被沿用
+        limiter = await self._limiters.get(
+            source_id,
+            concurrency=kwargs.get("concurrency"),
+            min_interval=kwargs.get("min_interval"),
+        )
 
         attempt = 0
         while True:
@@ -308,20 +327,37 @@ class HttpClient:
             return exc  # type: ignore[return-value]
         return NetworkError(str(exc))
 
-    def _assert_domain_allowed(self, url: str, source_id: str) -> None:
-        """校验目标域名在白名单内（规划书 §40）。"""
-        allowed = self._config.allow_domains
-        if not allowed:
-            return
+    def _assert_domain_allowed(
+        self,
+        url: str,
+        source_id: str,
+        allowed_domains: Collection[str] | None = None,
+    ) -> None:
+        """校验目标域名。
+
+        两道白名单都要过：
+
+        - ``config.allow_domains``：部署方设的全局限制（可留空）
+        - ``allowed_domains``：本次请求所属书源声明的 ``permissions.network``
+
+        第二道是关键 —— 书源写了「只访问 example.com」，运行时就得真的只能
+        访问 example.com，否则那份声明只是摆设。
+        """
         from urllib.parse import urlsplit
 
         host = urlsplit(url).hostname or ""
-        if not any(host == d or host.endswith(f".{d}") for d in allowed):
+
+        for allowed in (self._config.allow_domains, frozenset(allowed_domains or ())):
+            if not allowed:
+                continue
+            if any(host == domain or host.endswith(f".{domain}") for domain in allowed):
+                continue
+
             from ..errors import SourceExecutionError
 
             raise SourceExecutionError(
                 f"域名 {host} 不在允许列表内（source={source_id}）",
-                details={"host": host, "source_id": source_id},
+                details={"host": host, "source_id": source_id, "allowed": sorted(allowed)},
             )
 
 

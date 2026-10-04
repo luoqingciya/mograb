@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import typer
-from rich.console import Console
 
 from mograb import __version__
 
@@ -41,8 +40,7 @@ from .commands import (
     task,
     update,
 )
-
-console = Console()
+from .commands._common import console, set_verbose
 
 app = typer.Typer(
     name="mog",
@@ -85,11 +83,10 @@ def main(
         help="显示版本并退出",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="输出详细日志"),
-    json_output: bool = typer.Option(False, "--json", help="以 JSON 输出结果"),
 ) -> None:
     """MoGrab CLI。"""
-    # 上下文通过 typer.Context 传递；此处保留全局开关的占位。
-    # 实际状态初始化在命令实现中按需完成。
+    # 各命令用 --json 自己声明；这里只处理影响全局日志级别的 --verbose
+    set_verbose(verbose)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -108,21 +108,47 @@ class _GlobalSlot:
 
 
 class SourceLimiterRegistry:
-    """按 ``source_id`` 维护独立限流器。"""
+    """按 ``source_id`` 维护独立限流器。
 
-    def __init__(self, global_limiter: GlobalLimiter | None = None) -> None:
+    ``default_concurrency`` / ``default_min_interval`` 是兜底值：调用方没给
+    具体策略时用它们。书源自己声明了 ``network.concurrency`` 的话，首次取
+    限流器时传进来即可，之后沿用。
+    """
+
+    def __init__(
+        self,
+        global_limiter: GlobalLimiter | None = None,
+        *,
+        default_concurrency: int = 2,
+        default_min_interval: float = 0.5,
+    ) -> None:
         self._limiters: dict[str, SourceLimiter] = {}
         self._global = global_limiter or GlobalLimiter()
         self._lock = asyncio.Lock()
+        self._default_concurrency = default_concurrency
+        self._default_min_interval = default_min_interval
 
     async def get(
-        self, source_id: str, *, concurrency: int = 2, min_interval: float = 0.5
+        self,
+        source_id: str,
+        *,
+        concurrency: int | None = None,
+        min_interval: float | None = None,
     ) -> SourceLimiter:
-        """取（或创建）指定书源的限流器。"""
+        """取（或创建）指定书源的限流器。
+
+        已存在就直接返回，**不会**用新参数覆盖 —— 同一个来源的限速策略
+        在一轮运行里应该稳定，中途变来变去不好推理。
+        """
         async with self._lock:
             limiter = self._limiters.get(source_id)
             if limiter is None:
-                limiter = SourceLimiter(concurrency=concurrency, min_interval=min_interval)
+                limiter = SourceLimiter(
+                    concurrency=concurrency or self._default_concurrency,
+                    min_interval=(
+                        self._default_min_interval if min_interval is None else min_interval
+                    ),
+                )
                 self._limiters[source_id] = limiter
             return limiter
 

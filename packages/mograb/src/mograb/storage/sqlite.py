@@ -818,6 +818,7 @@ def _to_task(row: TaskRow) -> Task:
         retry_count=row.retry_count,
         max_retries=row.max_retries,
         resume_cursor=row.resume_cursor,
+        params=row.params or {},
         error_code=row.error_code,
         error_message=row.error_message,
         created_at=_parse_dt(row.created_at),
@@ -845,6 +846,7 @@ def _apply_task(task: Task, row: TaskRow) -> None:
     row.retry_count = task.retry_count
     row.max_retries = task.max_retries
     row.resume_cursor = task.resume_cursor
+    row.params = task.params
     row.error_code = task.error_code
     row.error_message = task.error_message
     row.started_at = task.started_at.isoformat() if task.started_at else None
