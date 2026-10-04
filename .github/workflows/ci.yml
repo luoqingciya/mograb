@@ -24,10 +24,10 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint + 格式
+  # Lint + 格式 + 文档内链
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint (ruff)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -48,6 +48,11 @@ jobs:
 
       - name: Ruff format check
         run: uv run ruff format --check .
+
+      # 文档里引用的文件必须真实存在。之前规划书被收进 docs/planning/ 时
+      # 就留下一批悬空引用，靠人眼查不现实。
+      - name: Check documentation links
+        run: uv run python scripts/check_docs.py
 
   # ---------------------------------------------------------------------------
   # 版本号来源
@@ -207,3 +212,36 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 桌面端（TypeScript 编译 + 类型检查）
+  #
+  # 只装依赖不下载 Electron 二进制 —— 类型检查和 tsc 编译都用不到它，
+  # 省一次上百兆的下载。
+  # ---------------------------------------------------------------------------
+  desktop:
+    name: Desktop (tsc)
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Type check
+        working-directory: apps/desktop
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: apps/desktop
+        run: npm run build

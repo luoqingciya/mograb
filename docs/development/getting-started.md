@@ -247,6 +247,7 @@ v1.0.0  规范稳定
 3. 本地通过全部检查：
    ```bash
    uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
+   uv run python scripts/check_docs.py    # 改过文档才需要
    ```
 4. 提交 PR 到 `develop`，说明动机、方案与测试情况
 5. 涉及架构决策的改动，需同时提交 ADR

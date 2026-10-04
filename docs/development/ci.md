@@ -12,11 +12,13 @@ push / PR → main, develop
         ↓
 ┌───────────────────────────────────────────┐
 │ lint          ruff check + format --check │
+│               + 文档内链校验               │
 │ version       VERSION 格式与来源唯一性     │
 │ type-check    pyright                     │
 │ test          矩阵：{3.11,3.12} × {linux,windows} │
 │ source-lint   tests/fixtures 下的参考书源   │
 │ build         uv build --all-packages     │
+│ desktop       npm ci + tsc 类型检查与编译  │
 └───────────────────────────────────────────┘
 ```
 
@@ -26,7 +28,9 @@ push / PR → main, develop
 |------|------|
 | `uv sync --locked` | 强制 lock 与 pyproject 一致，防止本地能跑 CI 不能跑 |
 | 测试矩阵含 Windows | 桌面端只支持 Windows，路径和编码问题要早发现 |
+| desktop job 设 `ELECTRON_SKIP_BINARY_DOWNLOAD` | 类型检查和 tsc 编译用不到 Electron 二进制，省一次上百兆的下载 |
 | `version` 独立成 job | 版本号来源出问题会让发版直接失败，值得单独可见 |
+| 文档内链校验并入 `lint` | 纯标准库脚本，不需要单独装环境；归在 lint 语义下也说得通 |
 | `source-lint` 独立成 job | 书源问题与代码问题分开定位 |
 | `-m "not network"` | 测试默认离线，不依赖外部站点可用性 |
 | `concurrency.cancel-in-progress` | 同分支的旧运行自动取消，省额度 |
@@ -50,6 +54,7 @@ uv sync --locked --all-packages
 
 uv run ruff check .
 uv run ruff format --check .
+uv run python scripts/check_docs.py
 uv run pyright
 uv run pytest -m "not network" --cov
 
@@ -117,9 +122,9 @@ GitHub Release（draft）
 | `MoGrab-CLI-v0.1.0-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
-桌面端的两个产物暂时还产不出来 —— `apps/desktop` 只有占位骨架，没有
-`package-lock.json`。工作流会检测这个文件，缺了就跳过桌面端那一路并打一条
-warning，等桌面端真正做起来（`npm install` 生成 lockfile 并提交）会自动生效。
+桌面端产物来自 `npm run build` + `electron-builder`，后端 sidecar 单独打包后
+放进 `resources/backend/`。版本号通过 `--config.extraMetadata.version` 从 tag 传入，
+不去改 `package.json` —— 改了会让 `package-lock.json` 里的版本对不上。
 
 ### 3.5 打包原则
 
@@ -200,3 +205,8 @@ Windows 上目录叫 `mog`、可执行文件叫 `mog.exe`，不冲突；Linux �
 
 **`uvicorn.run` 别传字符串。** `uvicorn.run("mograb_api.main:app", ...)` 靠运行时
 导入，PyInstaller 静态分析看不到，打出来的 exe 启动就报找不到模块。传 app 对象。
+
+**扫文档别把 `node_modules` 扫进来。** 第一版内链校验用 `rglob('*.md')` 一路扫下去，
+结果报了 521 条断链 —— 全部来自 `apps/desktop/node_modules/` 里第三方包自带的
+README，它们本来就不保证自己的相对链接有效。`scripts/check_docs.py` 里有一份
+`SKIP_DIRS`，新加需要排除的目录时改那里。

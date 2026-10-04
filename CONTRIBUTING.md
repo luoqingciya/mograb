@@ -124,6 +124,12 @@ class MySourceEngine:
 uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest -q
 ```
 
+改动过文档的话，再跑一次内链校验 —— 删文件、挪目录都可能留下悬空引用：
+
+```bash
+uv run python scripts/check_docs.py
+```
+
 ---
 
 ## 提交与 PR
