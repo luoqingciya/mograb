@@ -100,12 +100,16 @@ app = create_app()
 
 
 def run() -> None:
-    """console script 入口：``mograb-api``。"""
+    """console script 入口：``mograb-api``。
+
+    直接传 app 对象而不是 ``"mograb_api.main:app"`` 字符串 —— 后者靠运行时
+    导入，PyInstaller 静态分析发现不了，打出来的 exe 会在启动时报找不到模块。
+    """
     import uvicorn
 
     settings = load_settings()
     uvicorn.run(
-        "mograb_api.main:app",
+        app,
         host=settings.server.host,
         port=settings.server.port,
         log_config=None,

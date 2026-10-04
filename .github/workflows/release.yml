@@ -111,7 +111,8 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RAW_VERSION -replace '^v', ''
-          Compress-Archive -Path "release-artifacts/MoGrab-CLI/*" `
+          # 压缩 MoGrab-CLI 目录本身，这样解压出来顶层就是 MoGrab-CLI/
+          Compress-Archive -Path "release-artifacts/MoGrab-CLI" `
                            -DestinationPath "MoGrab-CLI-v$version-win-x64.zip"
 
       - name: Upload artifact

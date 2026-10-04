@@ -22,21 +22,51 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _force_utf8_output() -> None:
+    """把标准输出切到 UTF-8。
+
+    Windows 控制台默认编码是 cp1252 或 cp936，直接 print 中文会抛
+    UnicodeEncodeError。本地和 CI 行为要一致，所以显式设置。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_output()
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = REPO_ROOT / "release-artifacts"
 BUILD_DIR = REPO_ROOT / "build"
 
 # 各目标产物配置
+#
+# entry 用 scripts/ 下的专用入口，而不是包的 __main__.py —— 后者是相对导入，
+# 被 PyInstaller 当独立脚本跑时会失败。
+#
+# paths 显式给出源码目录：包是以 editable 方式装的，PyInstaller 未必能顺着
+# editable finder 找到源码，直接指路径更可靠。
 TARGETS = {
     "cli": {
-        "entry": REPO_ROOT / "apps" / "cli" / "src" / "mograb_cli" / "__main__.py",
+        "entry": REPO_ROOT / "scripts" / "entry_cli.py",
         "name": "mog",
         "out": ARTIFACTS / "MoGrab-CLI",
+        "paths": [
+            REPO_ROOT / "apps" / "cli" / "src",
+            REPO_ROOT / "packages" / "mograb" / "src",
+        ],
+        "metadata": ["mograb", "mograb-cli"],
     },
     "backend": {
-        "entry": REPO_ROOT / "apps" / "api" / "src" / "mograb_api" / "__main__.py",
+        "entry": REPO_ROOT / "scripts" / "entry_api.py",
         "name": "mograb-api",
         "out": ARTIFACTS / "backend",
+        "paths": [
+            REPO_ROOT / "apps" / "api" / "src",
+            REPO_ROOT / "packages" / "mograb" / "src",
+        ],
+        "metadata": ["mograb", "mograb-api"],
     },
 }
 
@@ -50,6 +80,19 @@ EXCLUDES = [
     "pytest",
     "pyright",
     "ruff",
+]
+
+# 动态导入、PyInstaller 静态分析发现不了的模块
+HIDDEN_IMPORTS = [
+    # SQLAlchemy 的 dialect 是按名字动态加载的
+    "sqlalchemy.dialects.sqlite",
+    "sqlalchemy.dialects.sqlite.aiosqlite",
+    # uvicorn 的运行期依赖
+    "uvicorn.logging",
+    "uvicorn.loops.auto",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan.on",
 ]
 
 
@@ -90,9 +133,26 @@ def build(target: str, version: str) -> Path:
     ]
     for module in EXCLUDES:
         args += ["--exclude-module", module]
+    for module in HIDDEN_IMPORTS:
+        args += ["--hidden-import", module]
+    for source_path in cfg["paths"]:
+        args += ["--paths", str(source_path)]
+    # 把 dist-info 元数据一起打进去。版本号是运行时从
+    # importlib.metadata 读的，不复制元数据的话会退化成 0.0.0+unknown。
+    for dist in cfg["metadata"]:
+        args += ["--copy-metadata", dist]
     args.append(str(entry))
 
     subprocess.run(args, check=True, cwd=REPO_ROOT)
+
+    # PyInstaller 会在 distpath 下再套一层以 --name 命名的目录，
+    # 这里拍平一层，让 mog.exe 直接落在 out_dir 下，
+    # 打包出来的 ZIP 里顶层就是 MoGrab-CLI/，不会多一层 mog/。
+    nested = out_dir / str(cfg["name"])
+    if nested.is_dir():
+        for item in nested.iterdir():
+            shutil.move(str(item), str(out_dir / item.name))
+        nested.rmdir()
 
     print(f"[build] 完成: {out_dir}")
     return out_dir

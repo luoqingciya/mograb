@@ -19,6 +19,20 @@ import re
 import sys
 from pathlib import Path
 
+
+def _force_utf8_output() -> None:
+    """把标准输出切到 UTF-8。
+
+    Windows 控制台默认编码是 cp1252 或 cp936，直接 print 中文会抛
+    UnicodeEncodeError。本地和 CI 行为要一致，所以显式设置。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_output()
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 CHECKSUM_FILE = "SHA256SUMS.txt"
