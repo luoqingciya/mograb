@@ -151,3 +151,49 @@ class TestStripRuntimeData:
     def test_每个构建目标都可能产生_data(self, build_module) -> None:
         """两个目标都会在 exe 旁边建 data/，所以清理对两者都要做。"""
         assert set(build_module.TARGETS) == {"cli", "backend"}
+
+
+class TestHiddenImports:
+    """打包的隐藏导入清单。
+
+    PyInstaller 只做静态分析，**按字符串动态导入的模块它看不见**。
+    这类漏掉的表现是：`--version`、`--help` 全都正常，一碰某个具体功能就
+    `ModuleNotFoundError` —— 很容易以为包是好的。
+
+    已经栽过两次：
+
+    - `aiosqlite`（SQLAlchemy 按字符串导入驱动包）—— rc1 的产物是坏的
+    - `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入平台实现）
+      —— rc3 的产物 `mog --install-completion` 直接崩
+
+    所以这里不测「清单里有几条」，而是**逐个确认那些已知的动态导入
+    目标都在清单里**。
+    """
+
+    def test_覆盖了_shellingham_的平台实现(self, build_module) -> None:
+        """shellingham 的入口是：
+
+            importlib.import_module(".{}".format(os.name), __name__)
+
+        所以当前平台的实现（Windows 是 `nt`，Linux 是 `posix`）必须显式列出。
+        """
+        import os
+
+        assert f"shellingham.{os.name}" in build_module.HIDDEN_IMPORTS
+
+    def test_覆盖了_sqlalchemy_的驱动包(self, build_module) -> None:
+        """`sqlalchemy.dialects.sqlite.aiosqlite` 只是 dialect 适配器，
+        真正的驱动包 `aiosqlite` 得单独列 —— 当初就是漏了后者。"""
+        assert "aiosqlite" in build_module.HIDDEN_IMPORTS
+
+    def test_清单里的模块都能导入(self, build_module) -> None:
+        """防止清单里写错名字 —— 写错了 PyInstaller 只会警告，不会失败。"""
+        import importlib
+
+        broken = []
+        for name in build_module.HIDDEN_IMPORTS:
+            try:
+                importlib.import_module(name)
+            except ImportError as exc:
+                broken.append(f"{name}: {exc}")
+        assert not broken, "这些隐藏导入导不进来（名字写错或依赖没装）:\n" + "\n".join(broken)

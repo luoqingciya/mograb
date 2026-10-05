@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc3`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc4`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -21,7 +21,7 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 710 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 713 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85.7% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 13,400（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
@@ -175,11 +175,25 @@
 需要一整套分发协议（版本协商、签名校验），收益不抵复杂度。替代方案是
 `repository` 字段 + 用户自行安装，见 v0.3.0 一节。
 
-**打包产物的冒烟测试曾经完全缺失。** rc1 发出去的 CLI 和桌面端都是坏的
-（SQLAlchemy 动态导入 `aiosqlite`，PyInstaller 没打进去），而构建、CI、发布
-三道关都只验「构建成功」，没人真执行过产物。现在 `scripts/build.py` 构建完
-自动跑一遍，CI 有独立的 `package-smoke` job，Release 工作流也会跑。
-这条已经从缺口变成防线。
+**打包漏动态导入的模块 —— 栽过两次。** rc1 的 CLI 和桌面端都是坏的
+（SQLAlchemy 按字符串导入 `aiosqlite`，PyInstaller 静态分析看不见）；
+rc3 又漏了 `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入平台实现），
+`mog --install-completion` 直接崩。
+
+表现都很欺骗：`--version`、`--help`、下载、导出全都正常，
+只有碰到那条特定路径才炸。
+
+现在有三道防线：
+
+1. 构建完自动跑一遍产物（`scripts/build.py` 的 `smoke_test()`），
+   CI 有独立的 `package-smoke` job，Release 工作流也会跑
+2. 冒烟测试里有一类「**允许非零退出、但绝不能抛异常**」的探测 ——
+   `--show-completion` 走的就是 shellingham 那条路。rc3 那版冒烟测试
+   要求所有检查都退 0，所以**没拦住**；现在分开了
+3. `tests/unit/test_build_script.py` 的 `TestHiddenImports` 逐个确认
+   已知的动态导入目标都在 `HIDDEN_IMPORTS` 里
+
+**「构建成功」不等于「产物能用」** 这条依然是这里最贵的教训。
 
 **CLI 与 API 的能力要对齐 —— 两个方向都要查。** 已经各栽过三次：
 

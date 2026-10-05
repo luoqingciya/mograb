@@ -5,6 +5,51 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [1.0.0rc4] - 2026-10-05
+
+修一个 rc3 产物的崩溃，并给这类问题补上防线。
+
+### 修复
+
+**`mog --install-completion` 在发布包里直接崩。** 用户报告：
+
+```
+ModuleNotFoundError: No module named 'shellingham.nt'
+RuntimeError: Shell detection not implemented for 'nt'
+```
+
+根因和 rc1 的 `aiosqlite` **是同一个坑**：PyInstaller 只做静态分析，
+而 shellingham 的入口是
+
+```python
+importlib.import_module(".{}".format(os.name), __name__)
+```
+
+字符串动态导入 —— 分析看不见，`shellingham/nt.py` 没被打进去。
+Typer 的 `--install-completion` / `--show-completion` 都要走这条路探测 shell，
+于是必崩。
+
+`HIDDEN_IMPORTS` 补上 `shellingham.nt` 和 `shellingham.posix`。
+
+**这类问题的表现很有欺骗性**：`--version`、`--help`、下载、导出全都正常，
+只有碰到那条特定路径才炸 —— 很容易以为包是好的。
+
+### 测试
+
+**冒烟测试加了一类「允许非零退出、但绝不能抛异常」的探测。**
+原先每条检查都要求退出码为 0，而 `--show-completion` 在没有可探测父进程的
+环境里本来就退 1（`Shell not supported.`）—— 「不可用」和「崩了」是两回事。
+现在跑一遍它，只断言输出里没有 `Traceback` / `ModuleNotFoundError`。
+
+**验证过这条检查真的能抓到**：临时注释掉 `shellingham.nt` 重新构建，
+它确实报出了 Traceback。
+
+`tests/unit/test_build_script.py` 加 `TestHiddenImports`：逐个确认那些
+**已知的动态导入目标**都在清单里（`shellingham.{os.name}`、`aiosqlite`），
+并验证清单里的模块都能导入（防写错名字 —— PyInstaller 对写错只会警告）。
+
+不测「清单有几条」，因为那个数字不说明任何事。
+
 ## [1.0.0rc3] - 2026-10-05
 
 **第三个预发布版本，也是内容最多的一版。** 主线是「把 API 和 CLI 拉齐」——
@@ -715,6 +760,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
 
+[1.0.0rc4]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc4
 [1.0.0rc3]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc3
 [1.0.0rc2]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc2
 [1.0.0rc1]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc1

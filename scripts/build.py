@@ -86,6 +86,15 @@ HIDDEN_IMPORTS = [
     # 而 `--version`、`--help` 都正常，很容易以为包是好的。
     # **这条漏过一次，rc1 的产物是坏的。**
     "aiosqlite",
+    # shellingham 按平台动态导入实现：
+    #     importlib.import_module(".{}".format(os.name), __name__)
+    # 字符串动态导入，静态分析看不见 —— 和 aiosqlite 同一个坑。
+    # 漏掉的后果是 `mog --install-completion` / `--show-completion` 直接崩：
+    #     ModuleNotFoundError: No module named 'shellingham.nt'
+    #     RuntimeError: Shell detection not implemented for 'nt'
+    # **这条也漏过一次（rc3 的产物）。**
+    "shellingham.nt",
+    "shellingham.posix",
     # uvicorn 的运行期依赖
     "uvicorn.logging",
     "uvicorn.loops.auto",
@@ -293,7 +302,30 @@ def _smoke_cli(out_dir: Path, version: str) -> None:
         (["book"], [], "书架是空的"),
     ]
 
+    # 允许非零退出、但**绝不能抛异常**的探测。
+    #
+    # 有些能力在 CI 那种环境里天然不可用（`--show-completion` 探测不到父
+    # 进程就退 1），但「不可用」和「崩了」是两回事 —— 后者说明打包漏了模块。
+    crash_free: list[list[str]] = [
+        # 走 shellingham 的平台分支（见 HIDDEN_IMPORTS 里的说明）
+        ["--show-completion"],
+    ]
+
     try:
+        for args in crash_free:
+            label = " ".join(args)
+            result = subprocess.run(
+                [str(exe), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+            output = (result.stdout or "") + (result.stderr or "")
+            if "Traceback" in output or "ModuleNotFoundError" in output:
+                sys.exit(f"[smoke] `mog {label}` 抛异常了: {output}")
+
         for args, expect_any, expect_all in checks:
             label = " ".join(args)
             result = subprocess.run(

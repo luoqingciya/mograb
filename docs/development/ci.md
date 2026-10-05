@@ -82,11 +82,11 @@ uv build --all-packages --out-dir dist
 发版前先改版本号：
 
 ```bash
-uv run python scripts/version.py set 1.0.0rc3   # 写进去的是规范化形式
+uv run python scripts/version.py set 1.0.0rc4   # 写进去的是规范化形式
 uv run python scripts/version.py check          # 确认来源唯一、格式合规
 ```
 
-`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc3`，
+`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc4`，
 `1.0.0.DEV0` → `1.0.0.dev0`），所以 `VERSION` 里的值就是最终值。
 `check` 验证三件事：VERSION 内容符合 PEP 440、三个包的 `pyproject.toml`
 用的是 dynamic version 且指向同一个文件、源码里没有硬编码的 `__version__`。
@@ -106,8 +106,8 @@ uv sync --all-packages --group build \
 ### 3.2 触发
 
 ```bash
-git tag v1.0.0rc3
-git push origin v1.0.0rc3
+git tag v1.0.0rc4
+git push origin v1.0.0rc4
 ```
 
 推 tag 就是发布 —— 工作流会直接建一个**公开**的 Release。
@@ -139,14 +139,14 @@ GitHub Release（预发布版本自动标 prerelease）
 
 ### 3.4 产物清单
 
-以 `1.0.0rc3` 为例：
+以 `1.0.0rc4` 为例：
 
 | 产物 | 类型 | 说明 |
 |------|------|------|
-| `MoGrab-CLI-v1.0.0rc3-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
-| `MoGrab-v1.0.0rc3-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
-| `MoGrab-Setup-v1.0.0rc3-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
-| `MoGrab-CLI-v1.0.0rc3-linux-x64.tar.gz` | Linux CLI | |
+| `MoGrab-CLI-v1.0.0rc4-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
+| `MoGrab-v1.0.0rc4-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
+| `MoGrab-Setup-v1.0.0rc4-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
+| `MoGrab-CLI-v1.0.0rc4-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
 命名统一带 `v` 前缀，桌面端两个产物用 `MoGrab-` 和 `MoGrab-Setup-` 区分 ——
@@ -285,9 +285,28 @@ Release 工作流都会跑它。
 **而开发态 `uv run` 是 UTF-8** —— 只有用户拿到的包是坏的，本地测不出来。
 修法是代码里显式设，见 `mograb.console.force_utf8_stdio()`。
 
-**PyInstaller 会漏掉动态导入的模块。** 上面那条 aiosqlite 就是。
+**PyInstaller 会漏掉动态导入的模块。** 已经栽过两次，都是同一个坑：
+
+| 漏掉的 | 谁在动态导入 | 表现 |
+|--------|-------------|------|
+| `aiosqlite` | SQLAlchemy 按字符串导入驱动包 | rc1 的 CLI 和桌面端都打不开数据库 |
+| `shellingham.nt` | `importlib.import_module(".{}".format(os.name))` | rc3 的 `mog --install-completion` 直接崩 |
+
+**这类问题的表现很有欺骗性**：`--version`、`--help`、下载、导出全都正常，
+只有碰到那条特定路径才炸 —— 很容易以为包是好的。
+
 判断一个包有没有被打进去**不能看 `_internal/` 里有没有同名目录** ——
-纯 Python 包会被塞进 PYZ，目录里根本不出现。只能真跑一遍。
+纯 Python 包会被塞进 PYZ，目录里根本不出现。**只能真跑一遍。**
+
+所以 `scripts/build.py` 有两道防线：
+
+1. `HIDDEN_IMPORTS` 里显式列出已知的动态导入目标
+2. 冒烟测试里有一类「**允许非零退出、但绝不能抛异常**」的探测 ——
+   `--show-completion` 在没有可探测父进程的环境里本来就退 1
+   （`Shell not supported.`），但「不可用」和「崩了」是两回事
+
+`tests/unit/test_build_script.py` 的 `TestHiddenImports` 逐个确认那些
+已知的动态导入目标都在清单里。**别测「清单有几条」**，那个数字不说明任何事。
 
 **扫文档别把 `node_modules` 扫进来。** 第一版内链校验用 `rglob('*.md')` 一路扫下去，
 结果报了 521 条断链 —— 全部来自 `apps/desktop/node_modules/` 里第三方包自带的
@@ -303,7 +322,7 @@ README，它们本来就不保证自己的相对链接有效。`scripts/check_do
 
 **发布说明别用内联 awk 提取。** 原先在 Release 工作流里用 awk 从 CHANGELOG
 切段落，正则里的反斜杠要穿过 YAML → bash → awk 三层转义。少一层就变成
-`^## [?1.0.0rc3]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
+`^## [?1.0.0rc4]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
 `flag` 永远是 0，最后把**整份 CHANGELOG（连版本规划表）**当成发布说明，
 而且不报错。现在走 `scripts/release.py notes`，`re.escape` 过的正则，
 `tests/unit/test_release_script.py` 盯着。
