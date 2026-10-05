@@ -82,11 +82,11 @@ uv build --all-packages --out-dir dist
 发版前先改版本号：
 
 ```bash
-uv run python scripts/version.py set 1.0.0rc4   # 写进去的是规范化形式
+uv run python scripts/version.py set 1.0.0rc5   # 写进去的是规范化形式
 uv run python scripts/version.py check          # 确认来源唯一、格式合规
 ```
 
-`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc4`，
+`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc5`，
 `1.0.0.DEV0` → `1.0.0.dev0`），所以 `VERSION` 里的值就是最终值。
 `check` 验证三件事：VERSION 内容符合 PEP 440、三个包的 `pyproject.toml`
 用的是 dynamic version 且指向同一个文件、源码里没有硬编码的 `__version__`。
@@ -106,8 +106,8 @@ uv sync --all-packages --group build \
 ### 3.2 触发
 
 ```bash
-git tag v1.0.0rc4
-git push origin v1.0.0rc4
+git tag v1.0.0rc5
+git push origin v1.0.0rc5
 ```
 
 推 tag 就是发布 —— 工作流会直接建一个**公开**的 Release。
@@ -139,14 +139,14 @@ GitHub Release（预发布版本自动标 prerelease）
 
 ### 3.4 产物清单
 
-以 `1.0.0rc4` 为例：
+以 `1.0.0rc5` 为例：
 
 | 产物 | 类型 | 说明 |
 |------|------|------|
-| `MoGrab-CLI-v1.0.0rc4-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
-| `MoGrab-v1.0.0rc4-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
-| `MoGrab-Setup-v1.0.0rc4-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
-| `MoGrab-CLI-v1.0.0rc4-linux-x64.tar.gz` | Linux CLI | |
+| `MoGrab-CLI-v1.0.0rc5-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
+| `MoGrab-v1.0.0rc5-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
+| `MoGrab-Setup-v1.0.0rc5-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
+| `MoGrab-CLI-v1.0.0rc5-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
 命名统一带 `v` 前缀，桌面端两个产物用 `MoGrab-` 和 `MoGrab-Setup-` 区分 ——
@@ -322,7 +322,7 @@ README，它们本来就不保证自己的相对链接有效。`scripts/check_do
 
 **发布说明别用内联 awk 提取。** 原先在 Release 工作流里用 awk 从 CHANGELOG
 切段落，正则里的反斜杠要穿过 YAML → bash → awk 三层转义。少一层就变成
-`^## [?1.0.0rc4]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
+`^## [?1.0.0rc5]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
 `flag` 永远是 0，最后把**整份 CHANGELOG（连版本规划表）**当成发布说明，
 而且不报错。现在走 `scripts/release.py notes`，`re.escape` 过的正则，
 `tests/unit/test_release_script.py` 盯着。

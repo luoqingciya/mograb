@@ -17,11 +17,12 @@ Typer 一升级就可能失效，而且失效方式是**静默的**：文案悄�
 from __future__ import annotations
 
 import re
+import sys
 
 import pytest
 from typer.testing import CliRunner
 
-from mograb_cli.main import app
+from mograb_cli.main import _strip_exe_suffix, app
 
 pytestmark = pytest.mark.unit
 
@@ -119,3 +120,47 @@ class TestErrorText:
 
         assert "'source_id'。" in output
         assert "'source_id'." not in output
+
+
+class TestStripExeSuffix:
+    """`sys.argv[0]` 结尾的 `.exe` 要去掉。
+
+    Click 用它推导 `prog_name`，于是打包后的产物里帮助写成
+    `用法: mog.exe [OPTIONS] ...`，生成的补全脚本注册成
+    `complete ... mog.exe`、环境变量叫 `_MOG.EXE_COMPLETE` ——
+    而用户敲的是 `mog`，补全根本不会触发。
+    """
+
+    def test_去掉_exe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["C:\tools\\mog.exe", "--help"])
+
+        _strip_exe_suffix()
+
+        assert sys.argv[0] == "C:\tools\\mog"
+
+    def test_大小写不敏感(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["mog.EXE"])
+
+        _strip_exe_suffix()
+
+        assert sys.argv[0] == "mog"
+
+    def test_没有后缀就不动(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """开发态跑的是 `uv run mog`，argv[0] 本来就不带 .exe。"""
+        monkeypatch.setattr(sys, "argv", ["/usr/local/bin/mog"])
+
+        _strip_exe_suffix()
+
+        assert sys.argv[0] == "/usr/local/bin/mog"
+
+    def test_别的后缀不动(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["mog.py"])
+
+        _strip_exe_suffix()
+
+        assert sys.argv[0] == "mog.py"
+
+    def test_argv_为空时不炸(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", [])
+
+        _strip_exe_suffix()  # 不抛异常即可

@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import typer
 
 from mograb import __version__
@@ -46,10 +48,33 @@ from .commands import (
 )
 from .commands._common import console, set_verbose
 
+
+def _strip_exe_suffix() -> None:
+    """把 ``sys.argv[0]`` 结尾的 ``.exe`` 去掉。
+
+    Click 用 ``argv[0]`` 推导 ``prog_name``，于是打包后的产物：
+
+    - 帮助里的用法行写成 ``用法: mog.exe [OPTIONS] ...``
+    - 生成的补全脚本注册成 ``complete ... mog.exe``，环境变量叫
+      ``_MOG.EXE_COMPLETE``（**名字里带点**）—— 而用户敲的是 ``mog``，
+      补全根本不会触发
+
+    改 ``argv[0]`` 而不是改 Click 的调用点，是因为全项目没有别处依赖它
+    （数据目录走的是 ``sys.executable``，见 ``runtime_dir()``）。
+    """
+    if sys.argv and sys.argv[0].lower().endswith(".exe"):
+        sys.argv[0] = sys.argv[0][:-4]
+
+
 # 必须在任何输出之前执行。打包后的 exe 无视 PYTHONUTF8 / PYTHONIOENCODING，
 # 默认按控制台代码页（中文 Windows 上是 GBK）输出 —— 于是 --json 产出的
 # 不是合法 JSON。详见 mograb.console。
 force_utf8_stdio()
+
+# 同理放模块级：`if __name__ == "__main__"` 在两条真实入口上**都不执行** ——
+# 打包走 `scripts/entry_cli.py`（它自己调 `app()`），开发走 console script
+# `mog = "mograb_cli.main:app"`。只有 `python -m mograb_cli.main` 会走到。
+_strip_exe_suffix()
 
 # Typer / Click 的内置文案是写死的英文，没有配置项。换成中文。
 # 见 _localize.py 的模块文档。

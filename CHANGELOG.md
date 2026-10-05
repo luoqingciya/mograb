@@ -5,6 +5,42 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [1.0.0rc5] - 2026-10-05
+
+把 rc4 修的那个补全功能真正做完整。
+
+### 修复
+
+**补全脚本注册的命令名带 `.exe`，所以根本不会触发。** rc4 让
+`--install-completion` 不崩了，但生成的脚本是：
+
+```bash
+complete -o default -F _mogexe_completion mog.exe
+_MOG.EXE_COMPLETE=complete_bash
+```
+
+而用户敲的是 `mog` —— bash 补全按字面匹配命令名，`mog <TAB>` 不会触发。
+环境变量名里还带个点（`_MOG.EXE_COMPLETE`），也很容易出问题。
+
+顺带一提，帮助里的用法行也写成 `用法: mog.exe [OPTIONS] ...`。
+
+根因是 Click 用 `sys.argv[0]` 推导 `prog_name`，而打包后的 `argv[0]` 是
+`mog.exe`。现在在 CLI 模块导入时把结尾的 `.exe` 去掉：
+
+```bash
+complete -o default -F _mog_completion mog
+_MOG_COMPLETE=complete_bash
+```
+
+> **改 `argv[0]` 而不是改 Click 的调用点**，是因为全项目没有别处依赖它 ——
+> 数据目录走的是 `sys.executable`（见 `runtime_dir()`）。
+
+> 这一处**第一次改错了**：我把它放在 `if __name__ == "__main__":` 里，
+> 而那个块在两条真实入口上都不执行 —— 打包走 `scripts/entry_cli.py`
+> （它自己调 `app()`），开发走 console script `mog = "mograb_cli.main:app"`。
+> 只有 `python -m mograb_cli.main` 会走到。现在放模块级，和
+> `force_utf8_stdio()`、`localize_typer()` 一致。
+
 ## [1.0.0rc4] - 2026-10-05
 
 修一个 rc3 产物的崩溃，并给这类问题补上防线。
@@ -760,6 +796,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
 
+[1.0.0rc5]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc5
 [1.0.0rc4]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc4
 [1.0.0rc3]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc3
 [1.0.0rc2]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc2
