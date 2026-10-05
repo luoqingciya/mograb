@@ -239,8 +239,13 @@ settings     （键值）
 **缓存键**（BLAKE2b-128 十六进制）由以下要素派生：
 
 ```
-source_id · method · normalized_url · body_hash · relevant_header_flags
+source_id · method · normalized_url · params · body_hash · relevant_header_flags
 ```
+
+`params` 是查询参数，**会先并进 url 再一起规范化**。它必须进键：书源把查询参数
+放在 `request.query` 里，渲染后是 `RenderedRequest.params`，与 `url` **分开**存放
+（`url` 里没有查询串）。漏掉它会让「同一路径、不同参数」撞到同一个键 ——
+表现为搜过 A 再搜 B，拿到的是 A 的结果，而且 30 分钟 TTL 内一直如此。
 
 `relevant_header_flags` 仅记录 `accept` / `accept-language` / `cookie`
 的**存在与否**（不记录值，避免 Cookie 泄漏）。

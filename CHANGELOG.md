@@ -5,6 +5,35 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [未发布]
+
+### 修复
+
+**搜索换了关键词却拿到上一次的结果 —— 缓存键漏了查询参数。**
+
+`HttpClient.fetch` 收下了 `params` 并把它传给了 httpx（**请求本身是对的**），
+但构造缓存键时只用了 `url`。而 `RenderedRequest` 把查询参数放在**独立的
+`params` 字段**里，`url` 里没有查询串 —— 于是同一站点的所有搜索共用一个键，
+**30 分钟 TTL 内换任何关键词，拿到的都是上一次的结果**。
+
+实测：`唐家三少` 与 `斗罗大陆` 两个关键词的缓存键完全相同；把 `params` 并进
+url 之后两键才分开。
+
+只影响 `search` —— `request.query` 只有搜索在用（`keyword` / `page`）；
+`book` / `chapters` / `content` 的 URL 是完整地址，不经 `params`，不受影响。
+
+修法：`build_cache_key` 增加 `params` 参数，在里面并进 url 后交给现有的
+`normalize_url` 规范化 —— 排序与去追踪参数的行为与原先一致，不引入第二套规则。
+缓存键方案变了，旧条目自然失效，**不需要迁移**。
+
+> 漏测的原因：`tests/unit/test_network.py` 里只有
+> `test_tracking_params_do_not_affect_key`（测 utm 参数**不该**影响键），
+> 方向正好相反，没有一条测「查询参数**必须**影响键」。已补回归测试。
+
+### 文档
+
+`storage-v1.md` 的缓存键公式、`cache.py` 的模块说明都补上了 `params`。
+
 ## [1.0.0rc7] - 2026-10-05
 
 ### 修复

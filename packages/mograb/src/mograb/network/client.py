@@ -172,7 +172,14 @@ class HttpClient:
         cache_key: str | None = None
         if use_cache and self._cache is not None:
             cache_key = build_cache_key(
-                source_id=source_id, method=method, url=url, body=data, headers=headers
+                source_id=source_id,
+                method=method,
+                url=url,
+                # params 必须传 —— 书源的查询参数与 url 是分开的，
+                # 漏掉它会让不同关键词撞到同一个键（见 cache.build_cache_key）
+                params=params,
+                body=data,
+                headers=headers,
             )
             entry = await self._cache.get(cache_key)
             if entry is not None:

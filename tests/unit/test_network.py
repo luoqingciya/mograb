@@ -62,6 +62,59 @@ class TestCacheKey:
         b = build_cache_key(source_id="s", method="GET", url="https://x.com/1")
         assert a == b
 
+    def test_params_affect_key(self) -> None:
+        """**查询参数必须进键。**
+
+        书源把查询参数写在 ``request.query`` 里，渲染后是
+        ``RenderedRequest.params``，与 ``url`` **分开**存放 —— ``url`` 里
+        没有查询串。漏掉 params 会让「搜 A」和「搜 B」撞到同一个键，
+        30 分钟 TTL 内换任何关键词拿到的都是上一次的结果。
+        """
+        a = build_cache_key(
+            source_id="s",
+            method="GET",
+            url="https://x.com/search",
+            params={"keyword": "唐家三少", "size": "50"},
+        )
+        b = build_cache_key(
+            source_id="s",
+            method="GET",
+            url="https://x.com/search",
+            params={"keyword": "斗罗大陆", "size": "50"},
+        )
+        assert a != b
+
+    def test_params_order_does_not_matter(self) -> None:
+        """参数顺序不同不该产生不同键（normalize_url 会排序）。"""
+        a = build_cache_key(
+            source_id="s", method="GET", url="https://x.com/s", params={"a": "1", "b": "2"}
+        )
+        b = build_cache_key(
+            source_id="s", method="GET", url="https://x.com/s", params={"b": "2", "a": "1"}
+        )
+        assert a == b
+
+    def test_params_merge_with_existing_query(self) -> None:
+        """url 上已经有查询串时，params 要并进去，而不是把原有的挤掉。"""
+        a = build_cache_key(
+            source_id="s", method="GET", url="https://x.com/s?page=2", params={"keyword": "a"}
+        )
+        b = build_cache_key(
+            source_id="s", method="GET", url="https://x.com/s?page=2", params={"keyword": "b"}
+        )
+        assert a != b
+        # 原有的 page 仍参与身份：只改 params 会变，只改 page 也会变
+        c = build_cache_key(
+            source_id="s", method="GET", url="https://x.com/s?page=3", params={"keyword": "a"}
+        )
+        assert a != c
+
+    def test_empty_params_same_as_none(self) -> None:
+        """不传 params 与传空字典等价，调用方不用特判。"""
+        a = build_cache_key(source_id="s", method="GET", url="https://x.com/s")
+        b = build_cache_key(source_id="s", method="GET", url="https://x.com/s", params={})
+        assert a == b
+
     def test_relevant_header_flag_affects_key(self) -> None:
         a = build_cache_key(source_id="s", method="GET", url="https://x.com", headers={})
         b = build_cache_key(
@@ -313,6 +366,39 @@ class TestHttpClientFetch:
 
         assert len(calls) == 1
         assert second.from_cache is True
+
+    async def test_different_params_do_not_share_cache(self) -> None:
+        """回归：不同查询参数不能命中同一条缓存。
+
+        原先缓存键漏了 ``params``，于是同一路径的所有搜索共用一个键 ——
+        ``mog search 唐家三少`` 之后再搜任何关键词，拿到的都是第一次的结果。
+        """
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(str(request.url))
+            return httpx.Response(200, content=b"x")
+
+        cache = MemoryCache()
+        async with make_client(handler) as client:
+            client._cache = cache
+            await client.fetch(
+                "GET", "https://e.com/search", params={"keyword": "唐家三少"}, source_id="s"
+            )
+            second = await client.fetch(
+                "GET", "https://e.com/search", params={"keyword": "斗罗大陆"}, source_id="s"
+            )
+            # 同一个参数再来一次，这次应该命中缓存
+            third = await client.fetch(
+                "GET", "https://e.com/search", params={"keyword": "斗罗大陆"}, source_id="s"
+            )
+
+        assert len(calls) == 2, "换了关键词却复用了上一次的缓存"
+        assert second.from_cache is False
+        assert third.from_cache is True
+        # 查询参数确实发出去了（请求这一路一直是对的，问题只在缓存键）
+        assert calls[0] != calls[1]
+        assert all("keyword=" in url for url in calls)
 
     async def test_cache_disabled(self) -> None:
         calls = []

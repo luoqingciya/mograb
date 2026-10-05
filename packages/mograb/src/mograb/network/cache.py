@@ -7,9 +7,14 @@
 
 - ``source_id``（不同书源对同一 URL 的规则不同，不可共用）
 - ``method``
-- ``url``（已规范化：去 fragment、排序 query）
+- ``url`` + ``params``（合并后规范化：去 fragment、排序 query）
 - ``body`` 的哈希
 - **相关**请求头（仅 ``Accept`` / ``Accept-Language`` / ``Cookie`` 的有无标记）
+
+> ``params`` 必须进键。书源把查询参数写在 ``request.query`` 里，渲染后是
+> ``RenderedRequest.params``，与 ``url`` **分开**存放 —— ``url`` 里没有查询串。
+> 只看 ``url`` 的话，「搜 A」和「搜 B」会撞到同一个键，30 分钟 TTL 内换任何
+> 关键词拿到的都是上一次的结果。踩过一次。
 
 **失效策略**（三层）：
 
@@ -27,6 +32,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..domain.chapter import normalize_url
 
@@ -82,6 +88,7 @@ def build_cache_key(
     source_id: str,
     method: str,
     url: str,
+    params: dict[str, str] | None = None,
     body: bytes | str | None = None,
     headers: dict[str, str] | None = None,
 ) -> str:
@@ -89,8 +96,17 @@ def build_cache_key(
 
     规范化保证「同一逻辑请求」总是映射到同一键，而「不同逻辑请求」
     （例如不同关键词）不会误命中。
+
+    ``params`` 会先并进 ``url`` 再一起规范化。**它必须进键** —— 书源把查询
+    参数写在 ``request.query`` 里，渲染后是 :class:`RenderedRequest` 的独立
+    字段，``url`` 里并没有查询串。只看 ``url`` 会让「同一路径、不同参数」
+    撞到同一个键。
     """
-    parts: list[str] = [source_id, method.upper(), normalize_url(url)]
+    parts: list[str] = [
+        source_id,
+        method.upper(),
+        normalize_url(_merge_params(url, params)),
+    ]
 
     if body is not None:
         raw = body.encode("utf-8") if isinstance(body, str) else body
@@ -106,6 +122,19 @@ def build_cache_key(
 
     digest = hashlib.blake2b("\x1f".join(parts).encode("utf-8"), digest_size=16)
     return digest.hexdigest()
+
+
+def _merge_params(url: str, params: dict[str, str] | None) -> str:
+    """把查询参数并进 URL。
+
+    顺序不用管 —— :func:`normalize_url` 会按 key 排序，并去掉追踪类参数。
+    所以这里只负责「别把参数弄丢」。
+    """
+    if not params:
+        return url
+    parts = urlsplit(url)
+    merged = [*parse_qsl(parts.query, keep_blank_values=True), *params.items()]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(merged), parts.fragment))
 
 
 def make_entry(
