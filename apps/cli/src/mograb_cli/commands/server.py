@@ -146,11 +146,18 @@ def start(
 
 
 def is_running_sync(host: str, port: int) -> bool:
-    """同步版健康检查 —— 命令是同步函数，不值得为这个起事件循环。"""
+    """同步版健康检查 —— 命令是同步函数，不值得为这个起事件循环。
+
+    和 ``_api.is_running`` 一样，回环地址不读环境代理 —— 见 ``trust_env_for``。
+    """
     import httpx
 
+    from ._api import trust_env_for
+
     try:
-        response = httpx.get(f"http://{host}:{port}/health", timeout=2.0)
+        response = httpx.get(
+            f"http://{host}:{port}/health", timeout=2.0, trust_env=trust_env_for(host)
+        )
     except httpx.HTTPError:
         return False
     return response.status_code == 200

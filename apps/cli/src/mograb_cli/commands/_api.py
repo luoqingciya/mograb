@@ -30,6 +30,26 @@ from ._common import console
 
 TIMEOUT_SECONDS = 10.0
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+"""回环地址。这些地址上的请求不该经过任何代理。"""
+
+
+def trust_env_for(host: str) -> bool:
+    """连这个 host 的 httpx 客户端要不要读环境里的代理设置。
+
+    httpx 默认 ``trust_env=True``，于是**连回环地址的请求也会走系统代理**。
+    装了代理的机器上（Clash 默认就是 ``127.0.0.1:7890``），代理对没人监听的
+    端口回的是 ``502`` 而不是连接失败 —— 「server 没在运行」于是被报成一个
+    看不懂的网关错误。
+
+    所以回环地址一律不读环境代理；非回环地址保持原样，``server.host`` 被配成
+    远程时代理可能是必需的。
+
+    > 这只管**连自己**的客户端。下载引擎（``mograb.network``）抓的是公网书源，
+    > 必须继续尊重 ``HTTP_PROXY`` 和 ``download.proxy`` 配置。
+    """
+    return host not in _LOOPBACK_HOSTS
+
 
 def api_base_url(settings: AppSettings) -> str:
     """本地 API 的根地址。"""
@@ -74,7 +94,9 @@ async def request(
     """
     url = f"{api_base_url(settings)}{path}"
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(
+            timeout=TIMEOUT_SECONDS, trust_env=trust_env_for(settings.server.host)
+        ) as client:
             response = await client.request(method, url, json=json, headers=auth_headers())
     except httpx.HTTPError as exc:
         raise ApiUnavailable(str(exc)) from exc
@@ -95,7 +117,9 @@ async def is_running(settings: AppSettings) -> bool:
     """
     url = f"http://{settings.server.host}:{settings.server.port}/health"
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(
+            timeout=2.0, trust_env=trust_env_for(settings.server.host)
+        ) as client:
             response = await client.get(url)
     except httpx.HTTPError:
         return False
@@ -129,6 +153,7 @@ __all__ = [
     "explain_unavailable",
     "is_running",
     "request",
+    "trust_env_for",
 ]
 
 
@@ -185,7 +210,9 @@ async def stream_task_events(
     try:
         # timeout=None：长连接，不能按普通请求的超时算
         async with (
-            httpx.AsyncClient(timeout=None) as client,
+            httpx.AsyncClient(
+                timeout=None, trust_env=trust_env_for(settings.server.host)
+            ) as client,
             client.stream("GET", url, headers=auth_headers()) as response,
         ):
             if response.status_code == 401:

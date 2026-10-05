@@ -5,6 +5,29 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [未发布]
+
+### 修复
+
+**CLI 连本地 API 的请求会走系统代理。** httpx 默认 `trust_env=True`，会把
+`HTTP_PROXY` / 系统代理用在**连回环地址**的请求上 —— 而回环地址根本不该经过
+代理。装了代理的机器（Clash 默认就是 `127.0.0.1:7890`）上，代理对没人监听的
+端口回 `502 Bad Gateway` 而不是连接失败，于是「server 没在运行」被报成一个
+看不懂的网关错误。
+
+现在按 host 判断：**回环地址（`127.0.0.1` / `localhost` / `::1`）不读环境代理，
+其余照旧**（`server.host` 被配成远程时代理可能是必需的）。改的是 4 处 httpx
+客户端：`_api.py` 的 `request` / `is_running` / `stream_task_events`，
+以及 `server.py` 的 `is_running_sync`。
+
+**下载引擎不受影响** —— 它抓的是公网书源，仍然尊重 `HTTP_PROXY` 和
+`download.proxy` 配置。桌面端不走这条路：主进程用 Node 的 `fetch`（不读系统
+代理），渲染进程的 `fetch` 虽然走 Chromium，而 Chromium 对回环地址有内置的
+直连规则。
+
+> 顺带：`test_pause_without_server_explains` 原先依赖「本机没装代理」这个隐含
+> 前提，现在变成环境无关了。
+
 ## [1.0.0rc6] - 2026-10-05
 
 三批改动：补完 v0.7.0 差的几项、把应用图标真正接进产物，以及文档与内部改进。

@@ -13,6 +13,9 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -308,6 +311,75 @@ class TestTaskCommands:
 
         assert result.exit_code == 1
         assert "令牌" in result.stdout
+
+
+@contextmanager
+def _fake_http_proxy():
+    """起一个「一律回 502」的假 HTTP 代理，产出它的地址。
+
+    用它来证明测试**真的在验证「绕过了代理」**：没绕过的话请求会打到这个代理
+    上，拿到 502 而不是连接失败，断言就会挂。
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        def _reply_502(self) -> None:
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            self._reply_502()
+
+        def do_POST(self) -> None:
+            self._reply_502()
+
+        def log_message(self, *args: object) -> None:
+            """别把访问日志打到测试输出里。"""
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+class TestLocalApiIgnoresSystemProxy:
+    """CLI 连本地 API 不能走系统代理。
+
+    httpx 默认 ``trust_env=True``，会把 ``HTTP_PROXY`` / 系统代理也用在**连回环
+    地址**的请求上。装了代理的机器上（Clash 默认就是 ``127.0.0.1:7890``），代理
+    对没人监听的端口回 502 而不是连接失败 —— 「server 没在运行」于是被报成一个
+    看不懂的网关错误。
+
+    这里同时清掉 ``NO_PROXY``：留着的话代理本来就被排除，测试就白测了。
+    """
+
+    def test_设了代理也照样报没在运行(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with _fake_http_proxy() as proxy:
+            for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+                monkeypatch.setenv(name, proxy)
+            for name in ("NO_PROXY", "no_proxy"):
+                monkeypatch.delenv(name, raising=False)
+            monkeypatch.setenv("MOGRAB_SERVER__PORT", str(_free_port()))
+
+            result = run("task", "pause", "whatever")
+
+        assert result.exit_code == 1
+        assert "没在运行" in result.stdout, f"请求像是被送到代理了：{result.stdout!r}"
+
+    def test_回环地址不读环境代理(self) -> None:
+        """策略本身：回环返回 False，其余保持 True。"""
+        from mograb_cli.commands._api import trust_env_for
+
+        assert trust_env_for("127.0.0.1") is False
+        assert trust_env_for("localhost") is False
+        assert trust_env_for("::1") is False
+        # server.host 被配成远程时代理可能是必需的 —— 不能一刀切
+        assert trust_env_for("api.example.com") is True
 
 
 class TestServerCommands:

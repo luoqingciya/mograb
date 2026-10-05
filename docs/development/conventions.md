@@ -55,7 +55,7 @@ cd apps/desktop && npm run typecheck && npm run build && npm test     # 动过�
 
 ## 3. 测试：两个环境差异
 
-这两条都是**本地和 CI 表现不一样**，都炸过。
+这几条都是**本地和 CI 表现不一样**，都炸过。
 
 ### CI 上的 CLI 输出带 ANSI 颜色，本地不带
 
@@ -78,6 +78,30 @@ httpx 报的是 `ReadTimeout` 而不是 `ConnectionRefused`，于是「没有 se
 测试在**本地必挂、CI 正常**。
 
 先确认不是自己的回归：`git stash` 做对照，再靠 CI 判定。
+
+### 系统代理会把连回环地址的请求也拦下来
+
+`urllib.getproxies()` 会读到系统代理（Clash 默认就是 `127.0.0.1:7890`），
+而 httpx 默认 `trust_env=True` —— 于是**连 `127.0.0.1` 的请求也会走代理**。
+代理对没人监听的端口回 `502 Bad Gateway`，而不是连接失败。后果有两层：
+
+- **测试**：「没有 server」那类断言拿到的是 502，不是「没在运行」——
+  和上一条一样，本地必挂、CI 正常（CI 上没有代理）
+- **产品**：装了代理的用户，`mog task *` 连自己的本地 API 也要绕一圈；
+  代理不放行回环时报的是看不懂的网关错误
+
+所以 **CLI 连本地 API 的 httpx 客户端按 host 决定要不要读环境代理**：
+`_api.trust_env_for()` 对回环地址（`127.0.0.1` / `localhost` / `::1`）返回
+`False`，其余照旧（`server.host` 被配成远程时代理可能是必需的）。
+
+**下载引擎是另一回事** —— 它抓公网书源，必须继续尊重 `HTTP_PROXY` 和
+`download.proxy` 配置。改的是「连自己」的客户端，不是「连外面」的。
+
+排查这类问题的第一步：
+
+```bash
+python -c "import urllib.request; print(urllib.request.getproxies())"
+```
 
 ## 4. CLI 开发
 
