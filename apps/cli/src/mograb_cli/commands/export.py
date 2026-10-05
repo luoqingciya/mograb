@@ -15,7 +15,7 @@ from ._common import command, console, emit, open_app
 
 @command
 async def export(
-    book_id: str = typer.Argument(..., help="MoGrab 书籍 ID"),
+    book_id: str = typer.Argument(..., help="MoGrab 书籍 ID（用 `mog book` 查）"),
     format: str | None = typer.Option(None, "--format", "-f", help="txt / markdown / epub"),
     output: Path | None = typer.Option(None, "--output", "-o", help="输出文件路径"),
     json_output: bool = typer.Option(False, "--json", help="以 JSON 输出"),

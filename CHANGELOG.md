@@ -15,7 +15,47 @@
 container / OPF / NCX 齐全、2037 个 xhtml）、正文无 HTML 残留；
 TXT 与 EPUB 都是合法 UTF-8。全文 0 失败。
 
+### 新增
+
+**`mog book` 不给 ID 时列出书架。** 用户报的：「导出书籍需要 `book_id`，
+但是我们没有查看的命令」。
+
+确实是断的：`mog export` / `mog update` 都要 `book_id`，而那个 ID 是 ULID
+（`book_01M459...`），没人记得住。原先只有一个「必须给 ID」的命令，
+下载完关掉终端就再也找不回自己的书了。
+
+API 那边一直有 `GET /api/v1/books`，CLI 没暴露 —— **API-First 的反向缺口**。
+
+实现上有一条容易忽略：**ID 必须完整显示。** Rich 的表格默认把列压到终端宽度
+以内，第一版渲染出来是 `book_01M4590…` —— 看着有输出，实际没法复制，
+这个命令就白做了。ID 列加了 `no_wrap=True`，`tests/integration/test_cli.py`
+的 `test_ID_完整显示不被截断` 钉住这条（用真实 ULID 长度，`book_t` 那种短 ID
+测不出来）。
+
+同时去掉了「字数」列 —— 6 列在 80 列的终端里会把书名挤成 4 行。
+字数在 `mog book <ID>` 的详情里有。
+
 ### 修复
+
+**`mog --help` 中英混排。** 面板标题是 `Options` / `Commands`，三条选项说明是
+英文：
+
+```
+│ --install-completion   Install completion for the current shell. │
+│ --help                 Show this message and exit.               │
+```
+
+这些是 Typer / Click **写死在库里的**，没有配置项。Typer 的 `_()` 就是
+`gettext.gettext`，走那条路要装 gettext 目录、配 locale、带 `.mo` 文件 ——
+对一个自带运行时的便携程序太重。
+
+新增 `mograb_cli/_localize.py`，改模块级变量和几个函数引用。连同错误文案
+（`Missing argument 'source_id'.` → `缺少参数 'source_id'。`）一起换成中文。
+`tests/unit/test_localize.py` 逐条钉住 —— **只断言「不该出现英文」不够，
+还要断言「该出现中文」**，否则补丁没生效时两条都过。
+
+> 这是**猴补丁**，Typer 升级后可能失效，而且失效方式是静默的：文案悄悄变回
+> 英文，不报错也不崩溃。所以那 11 条测试是必需的，不是锦上添花。
 
 **`download.proxy` 是第五处「声明了没接线」。** `HttpClientConfig.proxy`
 一直存在、也传给了 httpx，但 settings 里没有它、`config.toml` 模板里也没有 ——

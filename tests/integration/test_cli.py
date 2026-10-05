@@ -553,3 +553,131 @@ class TestSourceRepository:
 
         assert "可回滚" not in result.stdout
         assert "版本变更" in result.stdout
+
+
+# 真实的 ULID 长度（`book_` + 26 位）。用它才能验出「ID 被终端宽度截断」。
+_LONG_BOOK_ID = "book_01M4590M0VAKH0ND8G62G8G290"
+
+
+def _seed_long_id_book() -> None:
+    """塞一本 ID 够长的书。
+
+    ``_seed_chapter`` 用的是 ``book_t``，短得不会触发截断 ——
+    验「ID 完不完整」必须用真实长度。
+    """
+    from datetime import UTC, datetime
+
+    from mograb.app import create_application
+    from mograb.domain.book import Book
+
+    async def go() -> None:
+        async with create_application() as app:
+            now = datetime(2026, 1, 1, tzinfo=UTC)
+            await app.books.save(
+                Book(
+                    id=_LONG_BOOK_ID,
+                    source_id="example",
+                    source_book_id="49907",
+                    url="https://example.com/book/49907",
+                    title="斗罗大陆3龙王传说",
+                    author="唐家三少",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    asyncio.run(go())
+
+
+_BORDER = "│┌┐└┘├┤┬┴┼─"
+
+
+def _flatten(text: str) -> str:
+    """去掉空白和表格边框。
+
+    表格里的长文本会被 Rich 折行，``斗罗大陆3龙王传说`` 可能被拆成两行 ——
+    断言「显示出来了」得先把这些噪音去掉。
+
+    **但 ID 不能这么断**：它必须连续出现才是可复制的，
+    见 ``test_ID_完整显示不被截断``。
+    """
+    # 用 split() 去掉所有空白（不写 `\\n` 字面量，免得源码里混进转义）
+    return "".join(text.split()).translate(str.maketrans("", "", _BORDER))
+
+
+class TestBookCommand:
+    """``mog book`` —— 不给 ID 时列出书架。
+
+    这条命令是被用户逼出来的：``mog export`` 要 ``book_id``，但原先没有任何
+    命令能查到它，下载完关掉终端就找不回自己的书了。
+    """
+
+    def test_空书架给人话并指路(self) -> None:
+        result = run("book")
+
+        assert result.exit_code == 0
+        assert "书架是空的" in result.stdout
+        assert "mog search" in result.stdout
+
+    def test_列出已下载的书(self, example_yaml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 用宽终端跑：窄终端下书名会折行，折行后与其他列的内容交错，
+        # 「书名连续出现」就没法断言了。ID 那条断言不依赖宽度。
+        monkeypatch.setenv("COLUMNS", "200")
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_long_id_book()
+
+        result = run("book")
+
+        assert result.exit_code == 0
+        assert "斗罗大陆3龙王传说" in result.stdout
+        assert "唐家三少" in result.stdout
+
+    def test_ID_完整显示不被截断(self, example_yaml: str) -> None:
+        """**这条是重点。**
+
+        ID 就是要被复制去 ``mog export`` 的那个东西。Rich 默认会把列压到
+        终端宽度以内，于是显示成 ``book_01M4590…`` —— 看着有输出，实际没法用。
+        加 ``no_wrap=True`` 之前就是这个样子。
+        """
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_long_id_book()
+
+        result = run("book")
+
+        assert _LONG_BOOK_ID in result.stdout
+        assert "…" not in result.stdout.split("\n")[3]  # 表头下第一行数据
+
+    def test_json_是列表(self, example_yaml: str) -> None:
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_long_id_book()
+
+        payload = json.loads(run("book", "--json").stdout)
+
+        assert isinstance(payload, list)
+        assert payload[0]["id"] == _LONG_BOOK_ID
+        assert payload[0]["author"] == "唐家三少"
+
+    def test_json_空书架是空列表(self) -> None:
+        assert json.loads(run("book", "--json").stdout) == []
+
+    def test_只给_chapters_不给_ID_是参数错误(self) -> None:
+        result = run("book", "--chapters")
+
+        assert result.exit_code == 2
+        assert "book_id" in result.stdout
+
+    def test_给了_ID_仍是详情(self, example_yaml: str) -> None:
+        """列表模式不能把详情模式挤掉。"""
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_long_id_book()
+
+        result = run("book", _LONG_BOOK_ID)
+
+        assert result.exit_code == 0
+        assert "来源页" in result.stdout
+        assert "章节" in result.stdout
+
+    def test_不存在的_ID_退出码_3(self, example_yaml: str) -> None:
+        assert run("source", "install", example_yaml).exit_code == 0
+
+        assert run("book", "nope").exit_code == 3

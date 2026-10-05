@@ -280,12 +280,17 @@ def _smoke_cli(out_dir: Path, version: str) -> None:
     checks: list[tuple[list[str], list[str], str]] = [
         # 入口 + 版本元数据（--copy-metadata 有没有生效）
         (["--version"], [], version),
+        # 帮助界面必须是中文 —— Typer 的内置文案靠猴补丁换成中文的，
+        # 打包漏了模块或补丁失效都会**静默**退回英文，不报错。
+        (["--help"], ["选项", "命令"], ""),
         # 配置解析：不碰数据库，但会打印全部路径
         (["config", "path"], ["data"], ""),
         # **数据库读写**：这条是当初漏掉 aiosqlite 的地方
         (["source", "list"], [], ""),
         # 查询路径：本地全文搜索，走章节仓储
         (["find", "不存在的关键词"], [], "没有匹配"),
+        # 书架列表：`mog export` 要的 book_id 从这里查
+        (["book"], [], "书架是空的"),
     ]
 
     try:

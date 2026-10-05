@@ -5,7 +5,7 @@
 
     mog source   ...   书源管理（list/install/lint/test/doctor/enable/disable）
     mog search   ...   搜索
-    mog book     ...   书籍信息
+    mog book     ...   书籍详情 / 书架列表
     mog download ...   下载
     mog task     ...   任务控制（list/pause/resume/cancel/retry）
     mog update   ...   增量更新
@@ -29,6 +29,7 @@ import typer
 from mograb import __version__
 from mograb.console import force_utf8_stdio
 
+from ._localize import localize_typer
 from .commands import (
     book,
     cache,
@@ -50,6 +51,10 @@ from .commands._common import console, set_verbose
 # 不是合法 JSON。详见 mograb.console。
 force_utf8_stdio()
 
+# Typer / Click 的内置文案是写死的英文，没有配置项。换成中文。
+# 见 _localize.py 的模块文档。
+localize_typer()
+
 app = typer.Typer(
     name="mog",
     help="MoGrab —— 开源、API-First 的小说获取与电子书整理工具。",
@@ -67,7 +72,7 @@ app.add_typer(server.app, name="server", help="本地 API Server")
 
 # 注册单命令
 app.command("search", help="搜索小说")(search.search)
-app.command("book", help="查看书籍信息")(book.info)
+app.command("book", help="查看书籍（不给 ID 时列出书架）")(book.info)
 app.command("download", help="下载书籍")(download.download)
 app.command("update", help="增量更新书籍")(update.update)
 app.command("export", help="导出书籍")(export.export)

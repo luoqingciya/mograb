@@ -21,11 +21,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 668 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 687 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 12,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 7,200 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 源码行数 | 约 13,100（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 7,400 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（8 个 job） | `gh run list` |
@@ -180,6 +180,16 @@
 三道关都只验「构建成功」，没人真执行过产物。现在 `scripts/build.py` 构建完
 自动跑一遍，CI 有独立的 `package-smoke` job，Release 工作流也会跑。
 这条已经从缺口变成防线。
+
+**CLI 与 API 的能力要对齐 —— 两个方向都要查。** 已经各栽过一次：
+
+- `mog find` 只有 CLI，API 没有对应端点（补了 `GET /api/v1/search/local`）
+- 书架列表只有 API 有（`GET /api/v1/books`），CLI 没有 ——
+  于是用户下载完就再也找不回 `book_id`，`mog export` 用不了
+
+项目的原则是 **API-First，API 是正式产品接口**，但「CLI 有的 API 也得有」
+只是其中一半；**API 有的 CLI 也得有**，否则命令行用户寸步难行。
+加新能力时两边都过一遍。
 
 **Alembic 迁移目录没建。** 依赖声明了，但 `alembic/` 目录和首个迁移脚本还没有。
 现在 schema 是 `create_all` 建的，改表就得手写迁移。

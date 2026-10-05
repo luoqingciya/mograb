@@ -17,7 +17,7 @@ mog source   list | show | lint | test | install | remove
              enable | disable | rescan | doctor | init
 mog search   <keyword>              去书源上搜书
 mog find     <keyword>              在本地已下载的正文里搜
-mog book     <book-id>
+mog book     [<book-id>]            不给 ID 时列出书架
 mog download <book-id> | --url <URL> --source <ID>
 mog task     list | show | pause | resume | cancel | retry
 mog update   <book-id>
@@ -30,6 +30,10 @@ mog logs
 
 `mog search` 和 `mog find` 是两件事：前者去**书源**上找「哪本书」，
 后者在**本地已下载的正文**里找「哪一章」，纯本地、不联网。
+
+`mog book` 不给 ID 就是书架列表 —— `mog export` / `mog update` 都要 `book_id`，
+而那个 ID 是 ULID（`book_01M459...`），没人记得住。所以列表里 **ID 一定完整显示**，
+不会被终端宽度截断（表格里那条列设了 `no_wrap`）。
 
 `mog source test` 只接受**路径**不接受 ID —— 快照是开发期产物，
 安装时不复制到数据目录。详见规范 §12.3。
