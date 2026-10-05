@@ -83,9 +83,11 @@ v1 明确禁止：
 API Server 默认绑定 `127.0.0.1:48721`，不对外网暴露。
 
 > 已知限制：`localhost` 不等于安全。任何本机进程（包括浏览器中的恶意页面）
-> 都可能访问该端口。当前仅通过 CORS 限制来源。
-> **v0.4.0 引入 API 时必须增加随机 token 校验。**
-> 详见 `docs/evaluation/规划评估报告.md` P2-02。
+> 都可能访问该端口。所以**所有业务端点都要求 `Authorization: Bearer <token>`**
+> —— 令牌自动生成在 `data/token`，浏览器里的页面拿不到它。
+> 回环地址本身**不构成信任边界**，理由见
+> [ADR-0004](docs/architecture/decisions/ADR-0004-local-api-auth.md)。
+> CORS 只是额外一层，不是主要防线。
 
 ### 4. 凭据与敏感信息不落日志
 
@@ -154,7 +156,7 @@ Electron 配置：
 ### 3. 抓取行为的合规风险
 
 MoGrab 仅用于个人学习与研究。使用者需自行遵守目标站点的服务条款、
-`robots.txt` 与所在地区法律法规。详见 [README 使用声明](README.md#使用声明)。
+`robots.txt` 与所在地区法律法规。详见 [README 使用须知](README.md#使用须知)。
 
 ---
 

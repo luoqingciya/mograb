@@ -115,6 +115,9 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48721/api/v1/sources
 
 **除 `/health` 外，下面所有端点都要求 `Authorization: Bearer <token>`**（见 §2.2）。
 
+共 **24 条路径 / 28 个端点**（含 2 条 SSE）。核对办法：起一次 server，
+数 `GET /openapi.json` 里的 `paths` 与「路径 × 方法」组合。
+
 ```
 GET    /health                              健康检查（无需令牌）
 
@@ -125,6 +128,7 @@ DELETE /api/v1/sources/{id}                 卸载书源
 POST   /api/v1/sources/{id}/enable          启用
 POST   /api/v1/sources/{id}/disable         禁用
 POST   /api/v1/sources/{id}/doctor          健康检查
+POST   /api/v1/sources/rescan               重扫书源目录
 
 GET    /api/v1/search                       跨书源搜索（去站点上搜书）
 GET    /api/v1/search/local                 在已下载的正文里搜（纯本地）
@@ -143,7 +147,8 @@ POST   /api/v1/tasks/{id}/resume            继续
 POST   /api/v1/tasks/{id}/cancel            取消
 POST   /api/v1/tasks/{id}/retry             重试
 GET    /api/v1/tasks/{id}/events            SSE 单任务事件流
-GET    /api/v1/tasks/events                 SSE 全局事件流（新增）
+GET    /api/v1/tasks/events                 SSE 全局事件流
+GET    /api/v1/exports                      导出作业列表
 POST   /api/v1/exports                      创建导出作业
 GET    /api/v1/exports/{id}                 导出作业状态
 ```
@@ -161,7 +166,7 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "version": "1.0.0rc6" }
+{ "status": "ok", "version": "1.0.0rc7" }
 ```
 
 Desktop 启动时轮询此端点。**不需要令牌** —— 它只回答「有没有实例在跑」和版本号。

@@ -31,7 +31,7 @@
 | 改进文档 | 修正错误、补充示例、澄清歧义 | 低 |
 | 贡献书源 | 编写并测试新书源 | 中 |
 | 修复缺陷 | 从 `good first issue` 开始 | 中 |
-| 实现功能 | 参考 [开发优先级](docs/architecture/overview.md#8-开发优先级) | 中高 |
+| 实现功能 | 参考 [开发顺序](docs/architecture/overview.md#开发顺序) | 中高 |
 | 架构决策 | 提交 ADR 讨论 | 高 |
 
 **优先事项**：请遵循规划书的开发优先级
@@ -106,7 +106,7 @@ uv run ruff format .                           # 格式化
 `mograb.domain` **只允许**导入 pydantic 与标准库。禁止导入
 httpx / sqlalchemy / fastapi 等基础设施库。
 
-其他边界见[架构总览 §3](docs/architecture/overview.md#3-架构边界不可越权)。
+其他边界见[架构总览 §3](docs/architecture/overview.md#边界)。
 
 **禁止的越权示例**：
 

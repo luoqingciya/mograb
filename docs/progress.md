@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc6`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc7`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -8,7 +8,7 @@
 ## 一句话
 
 核心链路已经跑通，而且**在真实站点上验证过**：`bqgnovels.com` 的书源取到完整
-目录 1453 章，端到端下载 7 章 / 76,725 字，三种格式导出正常。
+目录 1453 章，端到端下载 2036 章 / 451 万字，三种格式导出正常。
 命令行、本地 API、桌面端三条路都通了；API 的所有业务端点都要求 Bearer 令牌；
 本地全文搜索（`mog find` / `GET /api/v1/search/local`）两条路都有；
 桌面端目前只做到最小闭环，书架、书源管理、设置还是占位页。
@@ -21,11 +21,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 784 | `uv run pytest --collect-only -q \| tail -1` |
-| 覆盖率 | 86.1% | `uv run pytest --cov --cov-report=term` |
+| 测试用例 | 787（786 通过 + 1 跳过） | `uv run pytest --collect-only -q \| tail -1` |
+| 覆盖率 | 86.2% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 13,900（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 8,600 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 源码行数 | 约 13,900（另有桌面端 TS 约 1,400 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 8,700 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（8 个 job） | `gh run list` |
@@ -203,8 +203,8 @@ cover / publisher / created_at`，并注明「允许用户通过模板配置」�
 
 | 应用 | 状态 | 说明 |
 |------|------|------|
-| `apps/cli` | 完成 | 11 组命令 |
-| `apps/api` | 完成 | 22 个端点 + SSE，全部要求 Bearer 令牌 |
+| `apps/cli` | 完成 | 12 组命令 |
+| `apps/api` | 完成 | 24 条路径 / 28 个端点（含 2 条 SSE），全部要求 Bearer 令牌 |
 | `apps/desktop` | 最小闭环 | 搜索 → 下载 → 任务进度可用；书架 / 书源 / 设置是占位 |
 
 ## 已知缺口
@@ -272,8 +272,8 @@ rc3 又漏了 `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入
 
 项目的原则是 **API-First，API 是正式产品接口**，但「CLI 有的 API 也得有」
 只是其中一半；**API 有的 CLI 也得有**，否则命令行用户寸步难行。
-加新能力时两边都过一遍。2026-10-05 全量核对过一次，27 个端点逐个对，
-结果记在下面。
+加新能力时两边都过一遍。2026-10-05 全量核对过一次，28 个端点（24 条路径）
+逐个对，结果记在下面。
 
 ### API ↔ CLI 能力对照（2026-10-05 核对）
 
