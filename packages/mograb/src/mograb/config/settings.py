@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..errors import ConfigError
@@ -117,6 +118,10 @@ class CacheSettings(BaseModel):
         return parse_size(self.max_size)
 
 
+_DC_KEY_RE = re.compile(r"[a-z][a-z0-9-]*")
+"""合法的 Dublin Core 元素名。"""
+
+
 class OutputSettings(BaseModel):
     """输出配置（§28、§35）。
 
@@ -129,6 +134,43 @@ class OutputSettings(BaseModel):
     format: str = "epub"
     template: str = "{{author}} - {{title}}"
     chapter_template: str = "{{index}}. {{title}}"
+
+    metadata: dict[str, str] = Field(default_factory=dict)
+    """EPUB 元数据补充（§27「允许用户通过模板配置」）。
+
+    键是 Dublin Core 元素名（``publisher`` / ``description`` / ``subject`` …），
+    值是模板，支持 ``{{title}}`` ``{{author}}`` ``{{source_id}}`` 等变量::
+
+        [output.metadata]
+        publisher = "个人整理"
+        subject = "{{author}} 作品"
+
+    **在这里写了就按你写的来** —— 和书籍自带的数据冲突时以配置为准，
+    否则「配置了却没生效」更难排查。
+    """
+
+    @field_validator("metadata")
+    @classmethod
+    def _check_metadata_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        """键必须是合法的 DC 元素名。
+
+        不校验的话，一个手滑的键名会生成**非法 XML**，而报错会出现在
+        「导出之后阅读器打不开」那里，离真正的原因很远。
+        """
+        for key in value:
+            if key == "identifier":
+                # 它决定「阅读器认为这是不是同一本书」，而且 OPF 里带
+                # `id="bookid"` 属性，不是能随便覆盖的普通字段。
+                raise ValueError(
+                    "元数据键 identifier 不可配置 —— 它由书籍 ID 生成，"
+                    "改了会让阅读器把同一本书当成两本"
+                )
+            if not _DC_KEY_RE.fullmatch(key):
+                raise ValueError(
+                    f"元数据键 {key!r} 不合法：只能用 Dublin Core 元素名"
+                    f"（小写字母开头，可含数字和连字符），如 publisher、subject"
+                )
+        return value
 
 
 class LoggingSettings(BaseModel):
@@ -230,6 +272,12 @@ directory = "exports"
 format = "epub"
 template = "{{author}} - {{title}}"
 chapter_template = "{{index}}. {{title}}"
+
+# EPUB 元数据补充。键是 Dublin Core 元素名，值支持 {{title}} {{author}} 等变量。
+# 在这里写了就按你写的来（和书籍自带数据冲突时以配置为准）。
+[output.metadata]
+# publisher = "个人整理"
+# subject = "{{author}} 作品"
 
 [logging]
 level = "INFO"

@@ -50,7 +50,8 @@ async def info(
         book = await application.books.get(book_id)
         if book is None:
             raise EntityNotFoundError(f"书籍不存在: {book_id}", details={"book_id": book_id})
-        listing = await application.chapters.list_by_book(book_id) if chapters else []
+        # 列目录只要摘要 —— `list_by_book` 会把整本书的正文读进内存
+        listing = await application.chapters.list_summaries(book_id) if chapters else []
 
     emit(
         {

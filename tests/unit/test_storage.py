@@ -458,3 +458,60 @@ class TestChapterContentSearch:
         hits = await chapters.search_content("荔枝")
 
         assert [h.chapter_index for h in hits] == [1, 2]
+
+
+class TestChapterSummaries:
+    """`list_summaries` —— 列目录不加载正文。
+
+    原先列目录走 `list_by_book`，那会把整本书的正文读进内存：
+    实测一本 2036 章 / 451 万字的书，**19.3 MB / 290 ms**，
+    而只要摘要时 **1.2 MB / 105 ms**。用户看到的都是一串标题。
+    """
+
+    async def test_返回摘要且按序号排序(self, chapters: SqliteChapterRepository) -> None:
+        for i in (2, 0, 1):
+            await chapters.save(make_chapter(f"chap_{i}", index=i, source_chapter_id=f"c{i}"))
+
+        summaries = await chapters.list_summaries("book_1")
+
+        assert [s.index for s in summaries] == [0, 1, 2]
+        assert summaries[0].id == "chap_0"
+        assert summaries[0].title == "第一章"
+
+    async def test_不带正文(self, chapters: SqliteChapterRepository) -> None:
+        """**这条是关键。**
+
+        摘要对象上没有 `content` 字段 —— 有人把它换回 `Chapter` 的话，
+        这条会立刻失败。光比内存占用是测不出来的。
+        """
+        await chapters.save(make_chapter())
+
+        summaries = await chapters.list_summaries("book_1")
+
+        assert not hasattr(summaries[0], "content")
+
+    async def test_has_content_在_SQL_里算(self, chapters: SqliteChapterRepository) -> None:
+        await chapters.save(make_chapter("chap_1", source_chapter_id="c1"))
+        await chapters.save(make_chapter("chap_2", source_chapter_id="c2", index=1, content=""))
+
+        summaries = await chapters.list_summaries("book_1")
+
+        assert [s.has_content for s in summaries] == [True, False]
+
+    async def test_只返回这本书的(self, chapters: SqliteChapterRepository, db: Database) -> None:
+        # chapters.book_id 有外键 —— 先落另一本书，否则插不进去。
+        # `source_book_id` 也要错开，它和 source_id 一起是唯一键。
+        await SqliteBookRepository(db).save(
+            make_book("book_other", source_book_id="9999", url="https://example.com/book/9999")
+        )
+        await chapters.save(make_chapter())
+        await chapters.save(
+            make_chapter("chap_other", book_id="book_other", source_chapter_id="c9")
+        )
+
+        summaries = await chapters.list_summaries("book_1")
+
+        assert [s.id for s in summaries] == ["chap_1"]
+
+    async def test_空书返回空列表(self, chapters: SqliteChapterRepository) -> None:
+        assert await chapters.list_summaries("book_1") == []

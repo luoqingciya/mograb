@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 import zipfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -35,9 +36,25 @@ from ..domain.book import Book
 from ..domain.chapter import Chapter
 from ..domain.enums import ExportFormat
 from ..logging.setup import get_logger
-from .base import ExportResult
+from .base import ExportResult, book_variables, render_template
 
 _logger = get_logger(__name__)
+
+_IMAGE_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _isoformat(moment: datetime) -> str:
+    """EPUB 元数据要的时间格式（``2026-01-01T00:00:00Z``）。"""
+    if moment.tzinfo is None:
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 MIMETYPE = "application/epub+zip"
 DEFAULT_LANGUAGE = "zh-CN"
@@ -63,9 +80,18 @@ class EpubExporter:
 
     format = ExportFormat.EPUB
 
-    def __init__(self, *, css: str | None = None, include_cover: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        css: str | None = None,
+        include_cover: bool = True,
+        covers_dir: Path | None = None,
+        metadata_templates: Mapping[str, str] | None = None,
+    ) -> None:
         self._css = css or DEFAULT_CSS
         self._include_cover = include_cover
+        self._covers_dir = covers_dir
+        self._metadata_templates = dict(metadata_templates or {})
 
     async def export(self, book: Book, chapters: list[Chapter], target: Path) -> ExportResult:
         """写出 EPUB 文件。"""
@@ -132,10 +158,33 @@ class EpubExporter:
 
             manifest_items.append('    <item id="css" href="style.css" media-type="text/css"/>')
 
-            # 7) OPF
+            # 7) 封面。要排在章节之前 —— 阅读器打开先看到封面。
+            cover = self._load_cover(book)
+            if cover is not None:
+                image_name, media_type, image_bytes = cover
+                zf.writestr(f"OEBPS/{image_name}", image_bytes)
+                zf.writestr("OEBPS/cover.xhtml", self._render_cover_xhtml(book, image_name))
+                manifest_items.insert(
+                    0,
+                    f'    <item id="cover-image" href="{image_name}" '
+                    f'media-type="{media_type}" properties="cover-image"/>',
+                )
+                manifest_items.insert(
+                    1,
+                    '    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>',
+                )
+                spine_items.insert(0, '    <itemref idref="cover"/>')
+
+            # 8) OPF
             zf.writestr(
                 "OEBPS/content.opf",
-                self._render_opf(book, book_id, manifest_items, spine_items),
+                self._render_opf(
+                    book,
+                    book_id,
+                    manifest_items,
+                    spine_items,
+                    has_cover=cover is not None,
+                ),
             )
 
     # ------------------------------------------------------------------
@@ -159,6 +208,51 @@ class EpubExporter:
             f"  <h1>{escape(chapter.title)}</h1>\n"
             f"{body}\n"
             "</body>\n"
+            "</html>\n"
+        )
+
+    def _load_cover(self, book: Book) -> tuple[str, str, bytes] | None:
+        """读出封面文件。
+
+        Returns:
+            ``(文件名, media-type, 字节)``；没封面或文件不在就 ``None``。
+
+        **拿不到就跳过** —— 封面是可选资产，不该让导出失败。
+        """
+        if not self._include_cover or self._covers_dir is None:
+            return None
+        if not book.cover_path:
+            return None
+
+        # `cover_path` 是相对**数据目录**的路径（见 covers 模块），
+        # 而 covers_dir 就是 `<数据目录>/covers`，所以只取文件名。
+        path = self._covers_dir / Path(book.cover_path).name
+        if not path.is_file():
+            _logger.warning("export.cover_missing", book_id=book.id, path=str(path))
+            return None
+
+        media_type = _IMAGE_MEDIA_TYPES.get(path.suffix.lower())
+        if media_type is None:
+            _logger.warning("export.cover_unknown_type", book_id=book.id, suffix=path.suffix)
+            return None
+
+        return f"cover{path.suffix.lower()}", media_type, path.read_bytes()
+
+    @staticmethod
+    def _render_cover_xhtml(book: Book, image_name: str) -> str:
+        title = escape(book.title)
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<!DOCTYPE html>\n"
+            '<html xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">\n'
+            "  <head>\n"
+            f"    <title>{title}</title>\n"
+            '    <link rel="stylesheet" type="text/css" href="style.css"/>\n'
+            "  </head>\n"
+            '  <body class="cover">\n'
+            f'    <img src="{image_name}" alt="{title}"/>\n'
+            "  </body>\n"
             "</html>\n"
         )
 
@@ -207,25 +301,57 @@ class EpubExporter:
             "</ncx>\n"
         )
 
-    @staticmethod
     def _render_opf(
+        self,
         book: Book,
         book_id: str,
         manifest_items: list[str],
         spine_items: list[str],
+        *,
+        has_cover: bool = False,
     ) -> str:
-        created = (
-            book.created_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if book.created_at.tzinfo
-            else datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
-        language = book.language or DEFAULT_LANGUAGE
+        # **`dcterms:modified` 是「修改时间」**，按 EPUB3 规范必须存在。
+        # 这里原先填的是 `created_at` —— 语义错了，改过来，另加 created。
+        modified = _isoformat(book.updated_at)
+        created = _isoformat(book.created_at)
         manifest = "\n".join(manifest_items)
         spine = "\n".join(spine_items)
 
-        meta_extra = ""
+        # 先把书籍自带的数据铺开，再让配置覆盖 —— **配置优先**。
+        # 反过来（书籍优先）的话，「我在配置里写了却没生效」会很难排查。
+        fields: dict[str, str] = {
+            "title": book.title,
+            "creator": book.author or "Unknown",
+            "language": book.language or DEFAULT_LANGUAGE,
+            "source": book.source_id,
+        }
         if book.intro:
-            meta_extra += f"    <dc:description>{escape(book.intro)}</dc:description>\n"
+            fields["description"] = book.intro
+        # `publisher` 不是 Book 的一等字段 —— 按 Source Spec §5.5，书源里
+        # 除约定字段外的键都进 `metadata`，所以从那儿取。
+        publisher = book.metadata.get("publisher")
+        if publisher:
+            fields["publisher"] = str(publisher)
+
+        variables = book_variables(book)
+        for key, template in (self._metadata_templates or {}).items():
+            rendered = render_template(template, variables)
+            if rendered:
+                fields[key] = rendered
+
+        # 顺序固定，输出才稳定（否则每次导出 OPF 都不同，diff 噪音大）
+        meta_extra = "".join(
+            f"    <dc:{key}>{escape(value)}</dc:{key}>\n"
+            for key, value in sorted(fields.items())
+            if key not in {"title", "creator", "language"}
+        )
+        # 这三个顺序固定放前面，阅读器和人眼都习惯先看到它们
+        head_meta = "".join(
+            f"    <dc:{key}>{escape(fields[key])}</dc:{key}>\n"
+            for key in ("title", "creator", "language")
+        )
+
+        cover_meta = '    <meta name="cover" content="cover-image"/>\n' if has_cover else ""
 
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -233,12 +359,13 @@ class EpubExporter:
             'unique-identifier="bookid">\n'
             '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
             f'    <dc:identifier id="bookid">{book_id}</dc:identifier>\n'
-            f"    <dc:title>{escape(book.title)}</dc:title>\n"
-            f"    <dc:creator>{escape(book.author or 'Unknown')}</dc:creator>\n"
-            f"    <dc:language>{language}</dc:language>\n"
-            f"    <dc:source>{escape(book.source_id)}</dc:source>\n"
+            f"{head_meta}"
             f"{meta_extra}"
-            f'    <meta property="dcterms:modified">{created}</meta>\n'
+            f'    <meta property="dcterms:modified">{modified}</meta>\n'
+            f'    <meta property="dcterms:created">{created}</meta>\n'
+            # EPUB2 的老阅读器靠这条找封面（EPUB3 用 manifest 里的
+            # properties="cover-image"）。两条都写，兼容性最好。
+            f"{cover_meta}"
             "  </metadata>\n"
             "  <manifest>\n"
             f"{manifest}\n"

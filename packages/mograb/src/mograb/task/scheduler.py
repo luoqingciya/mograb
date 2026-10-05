@@ -32,6 +32,7 @@ from pathlib import Path
 
 from ..content.normalizer import count_words
 from ..content.pipeline import ContentPipeline
+from ..covers import CoverStore
 from ..domain.book import Book
 from ..domain.chapter import Chapter, compute_content_hash, normalize_url
 from ..domain.ids import new_id
@@ -247,6 +248,7 @@ class DownloadScheduler:
         chapters: ChapterRepository,
         pipeline: ContentPipeline | None = None,
         exporter: Exporter | None = None,
+        covers: CoverStore | None = None,
     ) -> None:
         self._engine = engine
         self._sources = sources
@@ -254,6 +256,7 @@ class DownloadScheduler:
         self._chapters = chapters
         self._pipeline = pipeline
         self._exporter = exporter
+        self._covers = covers
 
     # ------------------------------------------------------------------
     # 书籍登记
@@ -285,7 +288,7 @@ class DownloadScheduler:
                 }
             )
             await self._books.save(refreshed)
-            return refreshed
+            return await self._ensure_cover(refreshed, source)
 
         book = Book(
             id=new_id("book"),
@@ -304,7 +307,27 @@ class DownloadScheduler:
         )
         await self._books.save(book)
         _logger.info("task.book_registered", book_id=book.id, source_id=source_id)
-        return book
+        return await self._ensure_cover(book, source)
+
+    async def _ensure_cover(self, book: Book, source: InstalledSource) -> Book:
+        """把封面下载到本地并记进 ``cover_path``。
+
+        **失败不影响任务。** 封面拿不到的原因很多（站点没给、CDN 挂了、
+        书源没把 CDN 域名写进白名单），都不该让整本书下载失败 ——
+        具体原因由 :class:`~mograb.covers.CoverStore` 写进日志。
+
+        旧书没有封面时也会走这里，所以 `mog update` 能把封面补上。
+        """
+        if self._covers is None:
+            return book
+
+        relative = await self._covers.ensure(book, allowed_domains=source.spec.permissions.network)
+        if relative is None:
+            return book
+
+        updated = book.model_copy(update={"cover_path": relative})
+        await self._books.save(updated)
+        return updated
 
     # ------------------------------------------------------------------
     # 计划
@@ -339,6 +362,8 @@ class DownloadScheduler:
                 模板算好 —— 调度器不该知道配置文件长什么样。
         """
         book, source = await self._load(book_id)
+        # 老书可能还没有封面（这条链路以前是断的），顺手补上
+        book = await self._ensure_cover(book, source)
         plan = await self._build_plan(book, source)
         report = DownloadReport(plan=plan)
 

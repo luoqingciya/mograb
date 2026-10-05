@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from ..domain.book import Book
-from ..domain.chapter import Chapter, ChapterSearchHit
+from ..domain.chapter import Chapter, ChapterSearchHit, ChapterSummary
 from ..domain.enums import HealthStatus, TaskStatus
 from ..domain.export import ExportRecord
 from ..domain.source import InstalledSource, SourceSpec
@@ -77,6 +77,15 @@ class ChapterRepository(Protocol):
     async def get(self, chapter_id: str) -> Chapter | None: ...
 
     async def list_by_book(self, book_id: str) -> list[Chapter]: ...
+
+    async def list_summaries(self, book_id: str) -> list[ChapterSummary]:
+        """列章节目录（**不含正文**）。
+
+        列目录别用 :meth:`list_by_book` —— 那个会把整本书的正文读进内存。
+        实测 2036 章的书，前者 19.3 MB、后者 0.1 MB，而用户看到的都是
+        一串标题。
+        """
+        ...
 
     async def get_by_index(self, book_id: str, index: int) -> Chapter | None:
         """按序号取单章（含正文）。

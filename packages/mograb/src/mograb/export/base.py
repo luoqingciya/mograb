@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -71,6 +72,27 @@ class Exporter(Protocol):
 # ---------------------------------------------------------------------------
 # 文件名与路径
 # ---------------------------------------------------------------------------
+def book_variables(book: Book) -> dict[str, str]:
+    """书名等变量，供 ``{{...}}`` 模板使用（§28）。"""
+    return {
+        "title": book.title or "untitled",
+        "author": book.author or "unknown",
+        "source_id": book.source_id,
+        "source_book_id": book.source_book_id,
+        "latest_chapter": book.latest_chapter or "",
+        "status": book.status.value,
+    }
+
+
+def render_template(template: str, values: Mapping[str, str]) -> str:
+    """把 ``{{var}}`` 换成值。认不出的变量换成空串。
+
+    **不做文件名清洗** —— 那是 :func:`render_filename` 的事。元数据模板
+    里可以有空格和标点。
+    """
+    return _TEMPLATE_VAR_RE.sub(lambda match: values.get(match.group(1), ""), template)
+
+
 def render_filename(template: str, *, book: Book, chapter: Chapter | None = None) -> str:
     """渲染文件名模板。
 
@@ -79,24 +101,13 @@ def render_filename(template: str, *, book: Book, chapter: Chapter | None = None
         {{title}} {{author}} {{source_id}} {{latest_chapter}} {{status}}
         {{index}} {{chapter_title}}（章节模板专用）
     """
-    values: dict[str, str] = {
-        "title": book.title or "untitled",
-        "author": book.author or "unknown",
-        "source_id": book.source_id,
-        "source_book_id": book.source_book_id,
-        "latest_chapter": book.latest_chapter or "",
-        "status": book.status.value,
-    }
+    values = book_variables(book)
     if chapter is not None:
         values["index"] = str(chapter.index)
         values["chapter_title"] = chapter.title
         values["chapter_id"] = chapter.id
 
-    def _sub(match: re.Match[str]) -> str:
-        return values.get(match.group(1), "")
-
-    rendered = _TEMPLATE_VAR_RE.sub(_sub, template)
-    return sanitize_component(rendered)
+    return sanitize_component(render_template(template, values))
 
 
 def sanitize_component(name: str) -> str:

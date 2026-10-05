@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ..domain.book import Book
-from ..domain.chapter import Chapter, ChapterSearchHit
+from ..domain.chapter import Chapter, ChapterSearchHit, ChapterSummary
 from ..domain.enums import (
     BookStatus,
     ExportFormat,
@@ -195,6 +195,36 @@ class SqliteChapterRepository:
             )
             rows = (await session.execute(stmt)).scalars().all()
             return [_to_chapter(r) for r in rows]
+
+    async def list_summaries(self, book_id: str) -> list[ChapterSummary]:
+        async with self._db.session() as session:
+            # 只 select 需要的列 —— **不要把 ChapterRow 整个捞出来**，
+            # 那会把正文一起读进内存（2036 章实测 19.3 MB）。
+            # `has_content` 在 SQL 里算，不传输正文。
+            stmt = (
+                select(
+                    ChapterRow.id,
+                    # **必须显式 label**：`Row.index` 是元组的方法（`index(value)`），
+                    # 不加 label 的话 `row.index` 拿到的是那个方法而不是列值。
+                    ChapterRow.index.label("chapter_index"),
+                    ChapterRow.title,
+                    ChapterRow.word_count,
+                    (func.length(ChapterRow.content) > 0).label("has_content"),
+                )
+                .where(ChapterRow.book_id == book_id)
+                .order_by(ChapterRow.index)
+            )
+            rows = (await session.execute(stmt)).all()
+            return [
+                ChapterSummary(
+                    id=row.id,
+                    index=row.chapter_index,
+                    title=row.title,
+                    word_count=row.word_count,
+                    has_content=bool(row.has_content),
+                )
+                for row in rows
+            ]
 
     async def get_by_index(self, book_id: str, index: int) -> Chapter | None:
         async with self._db.session() as session:

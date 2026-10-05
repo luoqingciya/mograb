@@ -8,6 +8,8 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from mograb.domain.chapter import Chapter
+from mograb.domain.chapter import ChapterSummary as DomainChapterSummary
 from mograb.errors import EntityNotFoundError
 
 from ..deps import ApplicationDep
@@ -76,13 +78,32 @@ def _to_book(book) -> BookOut:
     )
 
 
-def _to_summary(chapter) -> ChapterSummary:
+def _summary_from_chapter(chapter: Chapter) -> ChapterSummary:
+    """从完整章节（含正文）构造摘要。
+
+    只有「读单章正文」那条路用得上 —— 它本来就拿到整章了。
+    列目录走 `_summary_out`，不加载正文。
+    """
     return ChapterSummary(
         id=chapter.id,
         title=chapter.title,
         index=chapter.index,
         word_count=chapter.word_count,
         has_content=bool(chapter.content),
+    )
+
+
+def _summary_out(summary: DomainChapterSummary) -> ChapterSummary:
+    """领域摘要 → API schema。
+
+    领域那边已经算好了 `has_content`（SQL 里的布尔投影），这里不用再碰正文。
+    """
+    return ChapterSummary(
+        id=summary.id,
+        title=summary.title,
+        index=summary.index,
+        word_count=summary.word_count,
+        has_content=summary.has_content,
     )
 
 
@@ -112,7 +133,8 @@ async def list_chapters(book_id: str, application: ApplicationDep) -> list[Chapt
     book = await application.books.get(book_id)
     if book is None:
         raise EntityNotFoundError(f"书籍不存在: {book_id}", details={"book_id": book_id})
-    return [_to_summary(c) for c in await application.chapters.list_by_book(book_id)]
+    # 只要摘要 —— `list_by_book` 会把整本书的正文读进内存
+    return [_summary_out(s) for s in await application.chapters.list_summaries(book_id)]
 
 
 @router.get("/{book_id}/chapters/{chapter_id}", response_model=ChapterDetail, summary="章节正文")
@@ -125,7 +147,7 @@ async def get_chapter(book_id: str, chapter_id: str, application: ApplicationDep
             details={"book_id": book_id, "chapter_id": chapter_id},
         )
     return ChapterDetail(
-        **_to_summary(chapter).model_dump(),
+        **_summary_from_chapter(chapter).model_dump(),
         url=chapter.url,
         content=chapter.content,
         content_hash=chapter.content_hash,

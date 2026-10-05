@@ -27,6 +27,7 @@ from typing import Any
 
 from .config import AppSettings, Paths, get_paths, load_settings
 from .content.pipeline import ContentPipeline
+from .covers import CoverStore
 from .domain.book import Book
 from .domain.enums import ExportStatus, TaskType
 from .domain.export import ExportRecord
@@ -291,7 +292,11 @@ class Application:
             raise EntityNotFoundError(f"书籍不存在: {task.book_id}")
 
         fmt = str(task.params.get("format") or self.settings.output.format)
-        exporter = get_exporter(fmt)
+        exporter = get_exporter(
+            fmt,
+            covers_dir=self.paths.covers_dir,
+            metadata=self.settings.output.metadata,
+        )
         target = self.resolve_export_target(
             book, task.params.get("target"), fmt=exporter.format.value
         )
@@ -494,12 +499,14 @@ async def create_application(
 
     engine = SourceEngine(http)
     pipeline = ContentPipeline()
+    covers = CoverStore(http=http, paths=resolved_paths)
     scheduler = DownloadScheduler(
         engine=engine,
         sources=sources,
         books=books,
         chapters=chapters,
         pipeline=pipeline,
+        covers=covers,
     )
 
     app = Application(

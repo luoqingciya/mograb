@@ -327,6 +327,26 @@ result:
 | `search` | `title` / `url` | 结果条目的必需字段 |
 | `search` | `author` / `cover` / `intro` | 同名字段 |
 
+#### `cover` 与网络白名单
+
+`cover` 取到的是一个**图片 URL**，MoGrab 会去把它下载下来，存进
+`data/covers/`，导出 EPUB 时嵌进去。
+
+**这个请求同样受 `permissions.network` 约束** —— 白名单的意义就是
+「书源声明了什么就只能访问什么」，给封面开后门等于把这道门拆了。
+
+站点把封面放在 CDN 上很常见，所以**书源要把 CDN 域名也列进去**：
+
+```yaml
+permissions:
+  network:
+    - www.example.com
+    - cdn.example.com    # ← 封面在这里
+```
+
+不列的话封面下载会被拦掉。**不会静默失败** —— 日志里会说清楚是哪个域名
+不在白名单内、以及怎么修；下载任务本身照常完成（封面是可选资产）。
+
 #### `status` 的取值
 
 `status` 会被 :meth:`BookStatus.parse` 映射成 `ongoing` / `completed` / `unknown`。
