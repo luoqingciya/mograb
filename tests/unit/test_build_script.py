@@ -33,6 +33,20 @@ def _make_nested(out_dir: Path, name: str, exe_name: str) -> Path:
     return nested
 
 
+class TestSmokeExpectations:
+    def test_expected_subdirs_match_paths(self, build_module) -> None:
+        """冒烟测试的子目录清单必须和 `Paths._SUBDIRS` 一致。
+
+        `build.py` 刻意硬编码这份清单 —— 冒烟测试要验的是「产物的行为符合
+        预期」，预期独立于被测代码才有效力。代价是会漂：删掉 `data/cache/`
+        那次就漏改了这里，冒烟测试当场把它拦了下来。这条测试让漂移在
+        单测阶段就暴露，而不是等到构建。
+        """
+        from mograb.config.paths import _SUBDIRS
+
+        assert set(build_module.EXPECTED_DATA_SUBDIRS) == set(_SUBDIRS)
+
+
 class TestFlattenDist:
     def test_windows_style_exe_name(self, tmp_path: Path, build_module) -> None:
         """Windows：目录名 mog，可执行文件 mog.exe，名字不冲突。"""

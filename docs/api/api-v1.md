@@ -166,7 +166,7 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "version": "1.0.0rc7" }
+{ "status": "ok", "version": "1.0.0rc8" }
 ```
 
 Desktop 启动时轮询此端点。**不需要令牌** —— 它只回答「有没有实例在跑」和版本号。

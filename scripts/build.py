@@ -33,6 +33,14 @@ ARTIFACTS = REPO_ROOT / "release-artifacts"
 BUILD_DIR = REPO_ROOT / "build"
 
 ICON = REPO_ROOT / "assets" / "icon.ico"
+
+# 首次运行时必须建出来的数据子目录。
+#
+# **刻意不 import `mograb.config.paths._SUBDIRS`** —— 冒烟测试要验的是「产物的
+# 行为符合预期」，预期得独立于被测代码才有效力。代价是会漂，所以
+# `tests/unit/test_build_script.py` 有一条测试盯着它和 `_SUBDIRS` 保持同步
+# （删掉 `data/cache/` 时就漂过一次，冒烟测试当场拦下来了）。
+EXPECTED_DATA_SUBDIRS = ("covers", "logs", "exports", "sources")
 """Windows exe 图标。由 ``scripts/make_icon.py`` 生成，改了配色/几何要重新跑一遍。"""
 
 # 各目标产物配置
@@ -486,11 +494,7 @@ def _smoke_cli(out_dir: Path, version: str) -> None:
                 sys.exit(f"[smoke] `mog {label}` 输出里没有 {expect_all!r}\n{output}")
 
         # 首次运行必须把数据目录结构建全 —— 用户报告过这里不对
-        missing = [
-            name
-            for name in ("cache", "covers", "logs", "exports", "sources")
-            if not (data_dir / name).is_dir()
-        ]
+        missing = [name for name in EXPECTED_DATA_SUBDIRS if not (data_dir / name).is_dir()]
         if missing:
             sys.exit(f"[smoke] 数据目录没建全，缺: {', '.join(missing)}")
 

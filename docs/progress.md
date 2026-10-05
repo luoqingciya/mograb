@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc7`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc8`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -21,7 +21,7 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 787（786 通过 + 1 跳过） | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 797（796 通过 + 1 跳过） | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 86.2% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 13,900（另有桌面端 TS 约 1,400 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
