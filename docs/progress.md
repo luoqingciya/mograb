@@ -42,7 +42,7 @@
 | v0.4.0 | API | **达成** | — |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
 | v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
-| v0.7.0 | EPUB / Polish | **部分** | 封面、元数据模板、性能优化 |
+| v0.7.0 | EPUB / Polish | **部分** | 封面（完全没做）、EPUB 元数据模板、一处可量化的性能问题 |
 | v1.0.0 | Stable | **rc** | 真实站点验证、桌面端三个页面 |
 
 ### v0.1.0 逐项
@@ -114,6 +114,65 @@
 ✓ /api/v1                ✓ OpenAPI
 ✓ SSE                    ✓ 认证（Bearer token）
 ```
+
+### v0.7.0 逐项
+
+规划书 §v0.7.0 的清单逐条核对过（2026-10-05，对着代码而不是对着文档）：
+
+```
+✓ EPUB            ✓ 输出模板        ✓ 错误体验
+✗ Cover           ~ Metadata        ~ 性能优化
+```
+
+**EPUB** —— 自研导出器，结构完整（`mimetype` 是 STORED、container / OPF /
+NCX / xhtml 齐全）。真实站点 2036 章实测通过。
+
+**✗ Cover —— 完全没做，而且是「声明了没接线」。** 这条链路上每一环都有，
+只有中间断了：
+
+| 环节 | 状态 |
+|------|------|
+| 书源解析 `cover` 字段 | ✓ `engine.py` |
+| `Book.cover_url` / `cover_path` | ✓ 字段都在 |
+| `books.cover_url` / `cover_path` 列 | ✓ 表结构有 |
+| `data/covers/` 目录 | ✓ 创建了（实测**是空的**） |
+| `EpubExporter(include_cover=True)` | ✗ **参数赋值后再没被读过** |
+| 下载封面、写 `cover_path` | ✗ **没有任何代码做这件事** |
+| `cover.xhtml` | ✗ 只在模块 docstring 里出现过 |
+
+所以导出的 EPUB 里没有封面，`cover_path` 永远是 NULL。
+
+**~ Metadata** —— 规范 §27 要求 `title / author / language / description /
+cover / publisher / created_at`，并注明「**允许用户通过模板配置**」。
+实际输出：
+
+```
+✓ dc:identifier   ✓ dc:title     ✓ dc:creator
+✓ dc:language     ✓ dc:source    ✓ dc:description
+✗ cover（见上）    ✗ publisher（Book 里连字段都没有）
+~ created_at：写进了 `dcterms:modified`，但用的是 `book.created_at`
+   —— 按 EPUB3 语义这里该是**修改**时间
+✗ 模板配置：`OutputSettings` 只有文件名模板，没有元数据模板
+```
+
+**✓ 输出模板** —— `[output] template` / `chapter_template` +
+`render_filename()`，支持 `{{title}} {{author}} {{source_id}}` 等变量。
+
+**~ 性能优化** —— 规划书只写了四个字，没有标准，所以按实测找问题。
+找到一处可量化的：`list_by_book` 为了打印章节标题，把整本正文读进内存。
+
+| 查询 | 耗时 | 峰值内存 |
+|------|------|---------|
+| `list_by_book`（`mog book <ID> --chapters` 走这条） | 308 ms | **19.3 MB** |
+| `get_by_index`（`--chapter`） | 47 ms | 0.1 MB |
+| `stats_by_book`（统计） | 63 ms | 0.1 MB |
+
+2036 章 / 451 万字的书，只为列个标题。修法照 `stats_by_book` 的先例
+再加一个只取 `(index, title)` 的方法。
+
+**✓ 错误体验** —— 23 个领域错误类；CLI 和 API 各一张「领域错误 →
+退出码 / 状态码」表；中文文案 + 9 处指路提示；Typer / Click 的内置英文
+文案也做了本地化（见 [开发约定](development/conventions.md) §4）。
 
 ## 各模块完成度
 
