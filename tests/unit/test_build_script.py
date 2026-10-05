@@ -153,6 +153,13 @@ class TestStripRuntimeData:
         assert set(build_module.TARGETS) == {"cli", "backend"}
 
 
+# 平台专属的隐藏导入：只在对应平台上导入得了。
+_PLATFORM_ONLY = {
+    "shellingham.nt": "nt",
+    "shellingham.posix": "posix",
+}
+
+
 class TestHiddenImports:
     """打包的隐藏导入清单。
 
@@ -187,13 +194,23 @@ class TestHiddenImports:
         assert "aiosqlite" in build_module.HIDDEN_IMPORTS
 
     def test_清单里的模块都能导入(self, build_module) -> None:
-        """防止清单里写错名字 —— 写错了 PyInstaller 只会警告，不会失败。"""
+        """防止清单里写错名字 —— 写错了 PyInstaller 只会警告，不会失败。
+
+        **别的平台的实现要跳过。** `shellingham/nt.py` 在 import 的那一刻就碰
+        `ctypes.windll`，在 Linux 上必然 `AttributeError` —— 那不是清单写错，
+        是它本来就只属于 Windows。
+        """
         import importlib
+        import os
 
         broken = []
         for name in build_module.HIDDEN_IMPORTS:
+            owner = _PLATFORM_ONLY.get(name)
+            if owner is not None and owner != os.name:
+                continue
             try:
                 importlib.import_module(name)
-            except ImportError as exc:
-                broken.append(f"{name}: {exc}")
-        assert not broken, "这些隐藏导入导不进来（名字写错或依赖没装）:\n" + "\n".join(broken)
+            except Exception as exc:
+                broken.append(f"{name}: {exc!r}")
+
+        assert not broken, "这些隐藏导入导不进来（名字写错，或依赖没装）: " + "; ".join(broken)
