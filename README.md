@@ -1,3 +1,5 @@
+<img src="assets/icon.png" width="88" align="right" alt="MoGrab" />
+
 # MoGrab
 
 开源的小说抓取与电子书整理工具。Python 写的，后端 + 命令行 + Windows 桌面端。
@@ -39,7 +41,7 @@ content:
 
 ## 现在做到哪了
 
-版本 `1.0.0rc5`（**预发布**）。规范已经定下来，**整条链路都通了** ——
+版本 `1.0.0rc6`（**预发布**）。规范已经定下来，**整条链路都通了** ——
 装书源、搜书、下载、增量更新、导出、在已下载的正文里搜关键词（纯本地），
 全部有命令行入口；本地 API 在同一套 Core 上跑起来了；桌面端最小闭环可用。
 
@@ -315,7 +317,16 @@ timeout_ms = 15000
 enabled = true
 max_size = "5GB"
 ttl_seconds = 1800
+
+# 导出到 EPUB 时补的元数据。键是 Dublin Core 元素名，
+# 值支持 {{title}} {{author}} {{source_id}} 等变量。
+[output.metadata]
+publisher = "个人整理"
+subject = "{{author}} 作品"
 ```
+
+导出 EPUB 时会带上**封面**（如果书源声明了 `cover` 字段，且封面域名在书源的
+`permissions.network` 里 —— 封面常在 CDN 上，记得把 CDN 也列进去）。
 
 **代理**有两条路，都行：
 

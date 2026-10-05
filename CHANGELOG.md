@@ -5,11 +5,90 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
-## [未发布]
+## [1.0.0rc6] - 2026-10-05
 
-内部改进，不影响运行行为。
+三批改动：补完 v0.7.0 差的几项、把应用图标真正接进产物，以及文档与内部改进。
 
-### 打包：整包收集，不再逐个列模块名
+**运行行为**：封面、元数据、性能是新增能力；图标、打包、文档都不影响运行行为。
+
+### 新增
+
+**封面终于能用了。** 这条链路上每一环都有、只有中间断了：书源解析 `cover`
+✓、`Book.cover_url`/`cover_path` ✓、数据库列 ✓、`data/covers/` 目录 ✓，
+但 `EpubExporter(include_cover=True)` 参数赋值后再没被读过，
+**也没有任何代码去下载封面** —— 导出的 EPUB 从来没有封面，
+`cover_path` 永远是 NULL。
+
+现在整条通了：
+
+```
+书源 cover → Book.cover_url → 下载到 data/covers/<id>.<ext>
+  → Book.cover_path → EPUB 里的 cover.xhtml + properties="cover-image"
+```
+
+**封面请求同样受 `permissions.network` 约束。** 白名单的意义就是「书源声明了
+什么就只能访问什么」，给封面开后门等于把这道门拆了。封面常在 CDN 上，
+书源得把 CDN 域名也列进去；不列的话日志里会给出明确提示，而不是静默地
+没有封面。下载任务本身照常完成 —— 封面是可选资产。
+
+> 顺带修了本地那份 `bqgnovels` 书源的白名单（补上 `cdn.biquge7.top`）。
+> 但那个域名在本机解析到 `127.0.0.1`（被 sinkhole），所以这台机器上还是
+> 下不到 —— 代码路径是对的，换台网络正常的机器就行。
+
+**`[output.metadata]` —— EPUB 元数据模板配置。** 规范 §27 写着「允许用户
+通过模板配置」，一直没做：
+
+```toml
+[output.metadata]
+publisher = "个人整理"
+subject = "{{author}} 作品"
+```
+
+键是 Dublin Core 元素名（配置阶段就校验，写错会立刻报错而不是产出一个
+阅读器打不开的 EPUB）；值支持 `{{title}}` `{{author}}` 等变量。
+**配置优先于书籍自带的数据** —— 反过来「写了却没生效」更难排查。
+`identifier` 不允许配置，它决定阅读器认为这是不是同一本书。
+
+**EPUB 的 `publisher` 现在会写进去**（从 `Book.metadata` 取 —— 按
+Source Spec §5.5，书源里除约定字段外的键都进那儿）。
+
+### 修复
+
+**`dcterms:modified` 填错了值。** 按 EPUB3 它是**修改**时间，而实现填的是
+`created_at`。现在 `dcterms:created` 和 `dcterms:modified` 分别写。
+
+**列章节目录把整本书的正文读进了内存。** `mog book <ID> --chapters` 和
+API 的 `GET /books/{id}/chapters` 都走 `list_by_book`，那个会把正文一起
+捞出来 —— 只为打印一串标题。
+
+新增 `ChapterRepository.list_summaries()`，只取需要的列，`has_content`
+在 SQL 里算：
+
+| | 耗时 | 峰值内存 |
+|---|---|---|
+| 旧 `list_by_book` | 290 ms | **19.3 MB** |
+| 新 `list_summaries` | 105 ms | **1.2 MB** |
+
+2036 章 / 451 万字的书，内存省 16 倍。导出仍走 `list_by_book`（它确实要正文）。
+
+> 摘要用 dataclass 而不是 pydantic：2036 个实例的 pydantic 开销实测比
+> dataclass 多一倍不止（2.9 MB vs 1.2 MB）。和 `ChapterSearchHit` 同理 ——
+> 这是查询结果不是实体。
+
+### 测试
+
+- `test_covers.py`：封面下载的**每一种失败路径**（域名被拦、网络错误、
+  文件过大、格式认不出）都不该抛异常，也不该留下半截文件
+- `test_export.py` 的 `TestEpubCover` / `TestEpubMetadata` /
+  `TestMetadataTemplates`：封面进包且在首位、没有封面也能导出、
+  `include_cover` 真的生效、`dcterms:modified` 用 `updated_at`、
+  配置覆盖书籍数据、XML 转义
+- `test_storage.py` 的 `TestChapterSummaries`：**摘要对象上没有 `content`
+  字段** —— 有人换回 `Chapter` 的话这条会立刻失败（光比内存占用测不出来）
+
+### 打包
+
+**整包收集，不再逐个列模块名。**
 
 PyInstaller 会漏掉**按字符串动态导入**的模块，已经栽过两次
 （`aiosqlite`、`shellingham.nt`）。原先的做法是往 `HIDDEN_IMPORTS` 里
@@ -23,7 +102,36 @@ PyInstaller 会漏掉**按字符串动态导入**的模块，已经栽过两次
 收集，也确认清单里的模块在**当前平台**导得进来（跨平台的实现要跳过 ——
 `shellingham/nt.py` 一 import 就碰 `ctypes.windll`）。
 
-### 文档：项目知识从私记搬进仓库
+### 图标
+
+**图标做出来了，但一开始根本没接进产物。**
+
+`scripts/make_icon.py` 零依赖生成 `assets/icon.png`（512）和
+`assets/icon.ico`（16→256 七档），可 `build.py` 的 PyInstaller 参数里
+**没有 `--icon`**。而 PyInstaller 不传 `--icon` 时不会报错 —— 它会塞一个
+自己的默认图标：产物照样能跑，只是任务栏上不是我们的图标，**完全静默**。
+
+现在 CLI 接上了，桌面端也补了 `electron-builder` 的 `win.icon`
+（发布工作流会构建它，不接的话两个产物都得再发一版）。
+
+> **检查这件事不能用「资源段里有没有图标」** —— 默认图标让这个判据永远为真。
+> 冒烟测试改成比对**尺寸集合**：我们的是 `16/24/32/48/64/128/256`，
+> PyInstaller 默认的是 `16/32/48/256`。
+
+**小尺寸不做简化版图形。** 判据是算出来的，不是看图看出来的：16px 下书脊缝
+仍有 2px 宽、跨 3 行，箭头那一行也还是独立一段 —— 关键结构没塌，同一个图形
+从 256 一路用到 16 就够。这几条不变量写进了 `tests/unit/test_make_icon.py`，
+改几何时会先炸。
+
+> 判据刻意**不用「白连通域数量」**。那个量依赖抗锯齿后的 alpha 阈值：同一张
+> 图按 8 连通算是一块、按 4 连通算是三块。用它当断言，测的是阈值不是图形。
+
+`--preview` 会额外出一张「各档尺寸 × 浅色/深色底」的对照图，用来核配色在
+两种任务栏上都清楚。它是看样用的临时产物，不进版本库。
+
+### 文档
+
+**项目知识从私记搬进仓库。**
 
 原先有一份项目记忆文件，攒了 11K 字：工程约定、模块要点、打包注意事项、
 各种踩过的坑。问题有三个 —— 它不在仓库里（贡献者看不到）、不随代码版本化、
@@ -838,6 +946,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
 
+[1.0.0rc6]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc6
 [1.0.0rc5]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc5
 [1.0.0rc4]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc4
 [1.0.0rc3]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc3

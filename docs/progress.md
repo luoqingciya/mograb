@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc5`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc6`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -21,11 +21,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 713 | `uv run pytest --collect-only -q \| tail -1` |
-| 覆盖率 | 85.7% | `uv run pytest --cov --cov-report=term` |
+| 测试用例 | 784 | `uv run pytest --collect-only -q \| tail -1` |
+| 覆盖率 | 86.1% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 13,400（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 7,700 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 源码行数 | 约 13,900（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 8,600 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（8 个 job） | `gh run list` |
@@ -42,7 +42,7 @@
 | v0.4.0 | API | **达成** | — |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
 | v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
-| v0.7.0 | EPUB / Polish | **部分** | 封面（完全没做）、EPUB 元数据模板、一处可量化的性能问题 |
+| v0.7.0 | EPUB / Polish | **达成** | — |
 | v1.0.0 | Stable | **rc** | 真实站点验证、桌面端三个页面 |
 
 ### v0.1.0 逐项
@@ -117,60 +117,69 @@
 
 ### v0.7.0 逐项
 
-规划书 §v0.7.0 的清单逐条核对过（2026-10-05，对着代码而不是对着文档）：
+规划书 §v0.7.0 的清单，逐条对着代码核对（2026-10-05）：
 
 ```
 ✓ EPUB            ✓ 输出模板        ✓ 错误体验
-✗ Cover           ~ Metadata        ~ 性能优化
+✓ Cover           ✓ Metadata        ✓ 性能优化
 ```
 
 **EPUB** —— 自研导出器，结构完整（`mimetype` 是 STORED、container / OPF /
 NCX / xhtml 齐全）。真实站点 2036 章实测通过。
 
-**✗ Cover —— 完全没做，而且是「声明了没接线」。** 这条链路上每一环都有，
-只有中间断了：
-
-| 环节 | 状态 |
-|------|------|
-| 书源解析 `cover` 字段 | ✓ `engine.py` |
-| `Book.cover_url` / `cover_path` | ✓ 字段都在 |
-| `books.cover_url` / `cover_path` 列 | ✓ 表结构有 |
-| `data/covers/` 目录 | ✓ 创建了（实测**是空的**） |
-| `EpubExporter(include_cover=True)` | ✗ **参数赋值后再没被读过** |
-| 下载封面、写 `cover_path` | ✗ **没有任何代码做这件事** |
-| `cover.xhtml` | ✗ 只在模块 docstring 里出现过 |
-
-所以导出的 EPUB 里没有封面，`cover_path` 永远是 NULL。
-
-**~ Metadata** —— 规范 §27 要求 `title / author / language / description /
-cover / publisher / created_at`，并注明「**允许用户通过模板配置**」。
-实际输出：
+**Cover** —— 以前是「声明了没接线」：书源解析 `cover` ✓、`Book` 字段 ✓、
+数据库列 ✓、`data/covers/` 目录 ✓，但 `EpubExporter(include_cover=True)`
+赋值后再没被读过，也**没有任何代码去下载封面**。现在整条链路通了：
 
 ```
-✓ dc:identifier   ✓ dc:title     ✓ dc:creator
-✓ dc:language     ✓ dc:source    ✓ dc:description
-✗ cover（见上）    ✗ publisher（Book 里连字段都没有）
-~ created_at：写进了 `dcterms:modified`，但用的是 `book.created_at`
-   —— 按 EPUB3 语义这里该是**修改**时间
-✗ 模板配置：`OutputSettings` 只有文件名模板，没有元数据模板
+书源 cover 字段 → Book.cover_url
+  → CoverStore.ensure() 下载到 data/covers/<book_id>.<ext>
+  → Book.cover_path（相对数据目录）
+  → EPUB 里的 cover.xhtml + 图片 + properties="cover-image"
 ```
 
-**✓ 输出模板** —— `[output] template` / `chapter_template` +
-`render_filename()`，支持 `{{title}} {{author}} {{source_id}}` 等变量。
+**封面请求同样受 `permissions.network` 约束。** 白名单的意义就是「书源声明了
+什么就只能访问什么」，给封面开后门等于把这道门拆了。封面常在 CDN 上，
+书源要把 CDN 域名也列进去 —— 不列的话下载会被自己拦掉，日志里会给出
+明确提示（而不是静默地没有封面）。
 
-**~ 性能优化** —— 规划书只写了四个字，没有标准，所以按实测找问题。
-找到一处可量化的：`list_by_book` 为了打印章节标题，把整本正文读进内存。
+> **实测环境限制**：`bqgnovels` 的封面在 `cdn.biquge7.top`，而这个域名
+> 在本机解析到 `127.0.0.1`（被 sinkhole）。代码路径是对的，
+> 换台网络正常的机器就能下到。
 
-| 查询 | 耗时 | 峰值内存 |
-|------|------|---------|
-| `list_by_book`（`mog book <ID> --chapters` 走这条） | 308 ms | **19.3 MB** |
-| `get_by_index`（`--chapter`） | 47 ms | 0.1 MB |
-| `stats_by_book`（统计） | 63 ms | 0.1 MB |
+**Metadata** —— 规范 §27 要求 `title / author / language / description /
+cover / publisher / created_at`，并注明「允许用户通过模板配置」。现在：
 
-2036 章 / 451 万字的书，只为列个标题。修法照 `stats_by_book` 的先例
-再加一个只取 `(index, title)` 的方法。
+```
+✓ dc:identifier  ✓ dc:title      ✓ dc:creator
+✓ dc:language    ✓ dc:source     ✓ dc:description
+✓ dc:publisher（Book.metadata 里的 publisher，或配置覆盖）
+✓ dcterms:created + dcterms:modified
+✓ [output.metadata] 模板配置
+```
 
-**✓ 错误体验** —— 23 个领域错误类；CLI 和 API 各一张「领域错误 →
+顺带修了一处**语义错误**：`dcterms:modified` 原先填的是 `created_at`，
+而按 EPUB3 它该是**修改**时间。现在分别写 `dcterms:created` 和
+`dcterms:modified`。
+
+**输出模板** —— `[output] template` / `chapter_template` +
+`render_filename()`。
+
+**性能优化** —— 规划书只写了四个字，没有标准，所以按实测找。找到并修掉一处：
+列章节目录原先走 `list_by_book`，把整本书的正文读进内存。
+
+| | 耗时 | 峰值内存 |
+|---|---|---|
+| 旧：`list_by_book` | 290 ms | **19.3 MB** |
+| 新：`list_summaries` | 105 ms | **1.2 MB** |
+
+2036 章 / 451 万字的书，省下 16 倍内存。导出仍走 `list_by_book`（它确实
+要正文）。
+
+> 摘要用 dataclass 而不是 pydantic —— 2036 个实例的 pydantic 开销实测
+> 比 dataclass 多一倍不止（2.9 MB vs 1.2 MB）。
+
+**错误体验** —— 23 个领域错误类；CLI 和 API 各一张「领域错误 →
 退出码 / 状态码」表；中文文案 + 9 处指路提示；Typer / Click 的内置英文
 文案也做了本地化（见 [开发约定](development/conventions.md) §4）。
 
@@ -249,7 +258,7 @@ rc3 又漏了 `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入
 2. 冒烟测试里有一类「**允许非零退出、但绝不能抛异常**」的探测 ——
    `--show-completion` 走的就是 shellingham 那条路。rc3 那版冒烟测试
    要求所有检查都退 0，所以**没拦住**；现在分开了
-3. `tests/unit/test_build_script.py` 的 `TestHiddenImports` 逐个确认
+3. `tests/unit/test_build_script.py` 的 `TestPackagingCoverage` 逐个确认
    已知的动态导入目标都在 `HIDDEN_IMPORTS` 里
 
 **「构建成功」不等于「产物能用」** 这条依然是这里最贵的教训。
@@ -417,6 +426,13 @@ TXT 检查：开头有书名/作者/简介，章节间有分隔线，文件是�
 - **v0.4.0 的认证缺口已补**（2026-10-04）。API 的所有业务端点现在要求
   `Authorization: Bearer <token>`，令牌自动生成在 `data/token`。
   详见 [ADR-0004](architecture/decisions/ADR-0004-local-api-auth.md)
+- **应用图标真正接进产物**（2026-10-05）。`scripts/make_icon.py` 零依赖生成
+  `assets/icon.png` / `assets/icon.ico`，但 `build.py` 的 PyInstaller 参数里
+  **没有 `--icon`** —— 而 PyInstaller 不传它时**不报错**，会塞一个自己的
+  默认图标，产物照样能跑、只是任务栏上不是我们的图标。现在 CLI、后端、
+  桌面端三处都接上了；冒烟测试按**尺寸集合**核对（默认图标是
+  `16/32/48/256`，我们的是 `16/24/32/48/64/128/256`）。详见
+  [ci.md](development/ci.md)。
 
 ## 相关文档
 

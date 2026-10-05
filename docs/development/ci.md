@@ -82,11 +82,11 @@ uv build --all-packages --out-dir dist
 发版前先改版本号：
 
 ```bash
-uv run python scripts/version.py set 1.0.0rc5   # 写进去的是规范化形式
+uv run python scripts/version.py set 1.0.0rc6   # 写进去的是规范化形式
 uv run python scripts/version.py check          # 确认来源唯一、格式合规
 ```
 
-`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc5`，
+`set` 会把输入规范化成 PEP 440 的规范形式（`1.0.0.rc3` → `1.0.0rc6`，
 `1.0.0.DEV0` → `1.0.0.dev0`），所以 `VERSION` 里的值就是最终值。
 `check` 验证三件事：VERSION 内容符合 PEP 440、三个包的 `pyproject.toml`
 用的是 dynamic version 且指向同一个文件、源码里没有硬编码的 `__version__`。
@@ -106,8 +106,8 @@ uv sync --all-packages --group build \
 ### 3.2 触发
 
 ```bash
-git tag v1.0.0rc5
-git push origin v1.0.0rc5
+git tag v1.0.0rc6
+git push origin v1.0.0rc6
 ```
 
 推 tag 就是发布 —— 工作流会直接建一个**公开**的 Release。
@@ -139,14 +139,14 @@ GitHub Release（预发布版本自动标 prerelease）
 
 ### 3.4 产物清单
 
-以 `1.0.0rc5` 为例：
+以 `1.0.0rc6` 为例：
 
 | 产物 | 类型 | 说明 |
 |------|------|------|
-| `MoGrab-CLI-v1.0.0rc5-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
-| `MoGrab-v1.0.0rc5-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
-| `MoGrab-Setup-v1.0.0rc5-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
-| `MoGrab-CLI-v1.0.0rc5-linux-x64.tar.gz` | Linux CLI | |
+| `MoGrab-CLI-v1.0.0rc6-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
+| `MoGrab-v1.0.0rc6-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
+| `MoGrab-Setup-v1.0.0rc6-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
+| `MoGrab-CLI-v1.0.0rc6-linux-x64.tar.gz` | Linux CLI | |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
 命名统一带 `v` 前缀，桌面端两个产物用 `MoGrab-` 和 `MoGrab-Setup-` 区分 ——
@@ -305,8 +305,18 @@ Release 工作流都会跑它。
    `--show-completion` 在没有可探测父进程的环境里本来就退 1
    （`Shell not supported.`），但「不可用」和「崩了」是两回事
 
-`tests/unit/test_build_script.py` 的 `TestHiddenImports` 逐个确认那些
+`tests/unit/test_build_script.py` 的 `TestPackagingCoverage` 逐个确认那些
 已知的动态导入目标都在清单里。**别测「清单有几条」**，那个数字不说明任何事。
+
+**图标「没接上」是同一类静默失败。** PyInstaller 不带 `--icon` 时**不报错**，
+它会塞一个自己的默认图标 —— 产物照样能跑，只是任务栏上不是我们的图标。
+
+所以**「资源段里有没有图标」这个判据没有区分力**，只能比对尺寸集合：
+`assets/icon.ico` 是 `16/24/32/48/64/128/256`，PyInstaller 默认的是
+`16/32/48/256`。`build.py` 的 `_assert_exe_icon()` 干的就是这件事。
+
+桌面端那侧同理，走的是 `apps/desktop/package.json` 的 `win.icon` ——
+Release 工作流会构建它，漏了就得为图标再发一版。
 
 **扫文档别把 `node_modules` 扫进来。** 第一版内链校验用 `rglob('*.md')` 一路扫下去，
 结果报了 521 条断链 —— 全部来自 `apps/desktop/node_modules/` 里第三方包自带的
@@ -322,7 +332,7 @@ README，它们本来就不保证自己的相对链接有效。`scripts/check_do
 
 **发布说明别用内联 awk 提取。** 原先在 Release 工作流里用 awk 从 CHANGELOG
 切段落，正则里的反斜杠要穿过 YAML → bash → awk 三层转义。少一层就变成
-`^## [?1.0.0rc5]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
+`^## [?1.0.0rc6]?`，`[` 不再是转义字符而是字符组 —— 于是匹配不到标题，
 `flag` 永远是 0，最后把**整份 CHANGELOG（连版本规划表）**当成发布说明，
 而且不报错。现在走 `scripts/release.py notes`，`re.escape` 过的正则，
 `tests/unit/test_release_script.py` 盯着。
