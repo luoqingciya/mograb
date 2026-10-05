@@ -160,8 +160,8 @@ _PLATFORM_ONLY = {
 }
 
 
-class TestHiddenImports:
-    """打包的隐藏导入清单。
+class TestPackagingCoverage:
+    """打包要覆盖「按名字动态导入」的模块。
 
     PyInstaller 只做静态分析，**按字符串动态导入的模块它看不见**。
     这类漏掉的表现是：`--version`、`--help` 全都正常，一碰某个具体功能就
@@ -173,25 +173,23 @@ class TestHiddenImports:
     - `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入平台实现）
       —— rc3 的产物 `mog --install-completion` 直接崩
 
-    所以这里不测「清单里有几条」，而是**逐个确认那些已知的动态导入
-    目标都在清单里**。
+    所以**不逐个列名字，而是整包收集**（`COLLECT_SUBMODULES`）——
+    列名字要猜包内部会导入什么，猜漏一次就是一个只有用户能撞见的崩溃。
     """
 
-    def test_覆盖了_shellingham_的平台实现(self, build_module) -> None:
+    def test_整包收集覆盖了_shellingham(self, build_module) -> None:
         """shellingham 的入口是：
 
             importlib.import_module(".{}".format(os.name), __name__)
 
-        所以当前平台的实现（Windows 是 `nt`，Linux 是 `posix`）必须显式列出。
+        整包收集之后 `nt` / `posix` 都在里面，将来加子模块也不用改清单。
         """
-        import os
+        assert "shellingham" in build_module.COLLECT_SUBMODULES
 
-        assert f"shellingham.{os.name}" in build_module.HIDDEN_IMPORTS
-
-    def test_覆盖了_sqlalchemy_的驱动包(self, build_module) -> None:
+    def test_整包收集覆盖了_sqlalchemy_的驱动包(self, build_module) -> None:
         """`sqlalchemy.dialects.sqlite.aiosqlite` 只是 dialect 适配器，
-        真正的驱动包 `aiosqlite` 得单独列 —— 当初就是漏了后者。"""
-        assert "aiosqlite" in build_module.HIDDEN_IMPORTS
+        真正的驱动包 `aiosqlite` 得单独处理 —— 当初就是漏了后者。"""
+        assert "aiosqlite" in build_module.COLLECT_SUBMODULES
 
     def test_清单里的模块都能导入(self, build_module) -> None:
         """防止清单里写错名字 —— 写错了 PyInstaller 只会警告，不会失败。
@@ -214,3 +212,12 @@ class TestHiddenImports:
                 broken.append(f"{name}: {exc!r}")
 
         assert not broken, "这些隐藏导入导不进来（名字写错，或依赖没装）: " + "; ".join(broken)
+
+    def test_整包收集的包都存在(self, build_module) -> None:
+        """写错包名 PyInstaller 只会警告，产物里静默地少东西。"""
+        import importlib.util
+
+        missing = [
+            n for n in build_module.COLLECT_SUBMODULES if importlib.util.find_spec(n) is None
+        ]
+        assert not missing, f"这些包没装或名字写错: {missing}"

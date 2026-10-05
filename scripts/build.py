@@ -74,27 +74,28 @@ EXCLUDES = [
 ]
 
 # 动态导入、PyInstaller 静态分析发现不了的模块
+# 有「按名字动态导入子模块」的包，**整包收集**。
+#
+# 为什么不逐个列 `--hidden-import`：那要猜包内部会导入什么，猜漏一次就是
+# 一个只有用户能撞见的崩溃。已经栽过两次 ——
+#
+#   - `aiosqlite`：SQLAlchemy 按字符串导入驱动包（rc1 的产物打不开数据库）
+#   - `shellingham.nt`：Typer 的补全探测按
+#     `importlib.import_module(".{}".format(os.name))` 导入平台实现
+#     （rc3 的产物 `--install-completion` 直接崩）
+#
+# 这两个包都很小，整包带上的代价可以忽略。
+COLLECT_SUBMODULES = [
+    "shellingham",
+    "aiosqlite",
+]
+
 HIDDEN_IMPORTS = [
     # SQLAlchemy 的 dialect 是按名字动态加载的。
     # 下面这两条只解决 dialect **适配器**；真正的 DBAPI **驱动包**
-    # 还得单独列 —— 见下一行。
+    # 见上面的 COLLECT_SUBMODULES。
     "sqlalchemy.dialects.sqlite",
     "sqlalchemy.dialects.sqlite.aiosqlite",
-    # 驱动包本身。SQLAlchemy 通过 `import_dbapi()` 按字符串导入它，
-    # 静态分析看不见，漏掉的话产物一碰数据库就
-    # `ModuleNotFoundError: No module named 'aiosqlite'` ——
-    # 而 `--version`、`--help` 都正常，很容易以为包是好的。
-    # **这条漏过一次，rc1 的产物是坏的。**
-    "aiosqlite",
-    # shellingham 按平台动态导入实现：
-    #     importlib.import_module(".{}".format(os.name), __name__)
-    # 字符串动态导入，静态分析看不见 —— 和 aiosqlite 同一个坑。
-    # 漏掉的后果是 `mog --install-completion` / `--show-completion` 直接崩：
-    #     ModuleNotFoundError: No module named 'shellingham.nt'
-    #     RuntimeError: Shell detection not implemented for 'nt'
-    # **这条也漏过一次（rc3 的产物）。**
-    "shellingham.nt",
-    "shellingham.posix",
     # uvicorn 的运行期依赖
     "uvicorn.logging",
     "uvicorn.loops.auto",
@@ -174,6 +175,8 @@ def build(target: str, version: str) -> Path:
         args += ["--exclude-module", module]
     for module in HIDDEN_IMPORTS:
         args += ["--hidden-import", module]
+    for package in COLLECT_SUBMODULES:
+        args += ["--collect-submodules", package]
     for source_path in cfg["paths"]:
         args += ["--paths", str(source_path)]
     # 把 dist-info 元数据一起打进去。版本号是运行时从

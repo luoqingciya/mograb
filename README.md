@@ -375,6 +375,7 @@ MoGrab/
 - [Storage v1](docs/storage/storage-v1.md) —— 表结构
 - [API v1](docs/api/api-v1.md) —— 接口契约
 - [开发指南](docs/development/getting-started.md) —— 环境、命令、提交规范
+- [开发约定与容易踩的坑](docs/development/conventions.md) —— 约定背后的理由，和踩过的坑
 - [CI 与发布](docs/development/ci.md) —— 流水线与打包
 - [规划评估报告](docs/evaluation/规划评估报告.md) —— 对原始规划书的评估，以及几个关键裁决的理由
 - [原始规划书](docs/planning/项目规划书.md) —— 历史存档，**不是规范**，只用来追溯出处
