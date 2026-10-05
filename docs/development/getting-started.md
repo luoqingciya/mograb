@@ -31,8 +31,8 @@ uv run pre-commit install       # 安装 Git 钩子
 ### 1.3 验证环境
 
 ```bash
-uv run mog --version            # mog (MoGrab) 1.0.0rc2
-uv run pytest -q                # 705 passed
+uv run mog --version            # mog (MoGrab) 1.0.0rc3
+uv run pytest -q                # 708 passed
 uv run ruff check .             # All checks passed!
 uv run pyright                  # 0 errors
 ```
@@ -95,7 +95,7 @@ uv run python scripts/version.py flags          # 输出版本属性（CI 用）
 ```
 
 `set` 会把输入规范化成 PEP 440 的标准写法（比如 `1.0.0.rc1` 会变成
-`1.0.0rc2`）。**改完必须强制重装工作区包**，否则产物带旧版本号且不报错：
+`1.0.0rc3`）。**改完必须强制重装工作区包**，否则产物带旧版本号且不报错：
 
 ```bash
 uv sync --all-packages --group build \
@@ -129,6 +129,7 @@ uv run mog --help
 uv run mog source lint tests/fixtures/example-source/source.yaml   # 只查规则能否编译
 uv run mog source test tests/fixtures/example-source               # 真跑一遍提取
 uv run mog find 关键词                                             # 搜本地已下载的正文
+uv run mog task watch                                             # 实时跟踪任务（需 server 在跑）
 uv run mog config path
 
 # API

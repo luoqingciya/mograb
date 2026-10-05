@@ -5,7 +5,7 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
-## [未发布]
+## [1.0.0rc3] - 2026-10-05
 
 第一次真实站点全量下载（`bqgnovels.com` 的《斗罗大陆3龙王传说》，
 2036 章 / 451 万字）暴露出来的问题。
@@ -58,6 +58,23 @@ API 那边一直有 `GET /api/v1/books`，CLI 没暴露 —— **API-First 的�
 字数在 `mog book <ID>` 的详情里有。
 
 ### 修复
+
+**取消停不下正在进行的下载。** `mog task cancel` 返回 200、数据库里状态也变成
+`cancelled`，但**下载还在继续** —— 实测取消后事件流仍推进
+`174/2036 → 188/2036`。
+
+根因是 `TaskRunner` 只在**进入 handler 之前**检查一次 `is_cancelled`，
+而 `DownloadScheduler` 的逐章循环里没有任何取消检查。表现是「静默地做错事」：
+命令说成功了，任务却没停。
+
+修法是给调度器加 `should_stop` 回调（和 `on_progress` 同形状，**同步的**），
+在**拿到并发信号量之后、发请求之前**检查。位置有讲究 —— 放在最前面的话，
+所有协程在开工那一刻就检查完了，后来的取消谁也看不见。
+
+同时把 `asyncio.gather` 换成 `TaskGroup`：取消时 gather 会把其余协程
+**丢在后台继续跑**（它只抛第一个异常，不取消兄弟）。注意 TaskGroup 会把异常
+包成 `ExceptionGroup`，而 `TaskRunner` 是按 `except TaskCancelledError` 判断的，
+得先拆开 —— 否则取消会被当成「意料之外的失败」标成 FAILED。
 
 **SSE 从来不发进度事件。** 这是第六处「声明了没接线」，而且是用户看不见的那种：
 
@@ -128,6 +145,30 @@ Rich 知道有 Live 区域，会把日志排在进度条**上方**。
 pytest 先挂了自己的 handler，注入的通道完全没生效。
 
 「配了等于没配，还不报错」正是这个项目反复在防的那类问题。
+
+### 文档
+
+**README 重写。** 加了两块内容：
+
+- **「怎么用」** —— 三条路（CLI 发布包 / 源码 / 桌面端）分开讲，
+  并**明确推荐命令行**。桌面端只有搜索和下载两页能用，书架、书源管理、
+  设置都还是占位页 —— 这一点之前 README 没说，读者容易误判。
+- **命令行教程** —— 从装书源到导出走一遍完整流程，配真实输出。
+
+同时修掉几处过时信息：
+
+| 位置 | 原来 | 实际 |
+|------|------|------|
+| README「现在做到哪了」 | 端到端下载 **7 章** / 76,725 字 | 2036 章 / 451 万字，0 失败 |
+| README 测试数 | 654 个测试 | 708 |
+| `SECURITY.md` | 「目前处于 v0.x 阶段」，版本表 `0.1.x` | `1.0.0rc` 预发布 |
+| `docs/api/api-v1.md` | `/health` 示例写 `1.0.0rc1` | 当前版本 |
+
+`SECURITY.md` 那份尤其误导 —— 仓库里**从来没有 0.1.x 的发布**，
+`VERSION` 一直是 `1.0.0rc*`，那是规划书里的旧编号漏过来的。
+
+领域模型补了「取消什么时候生效」：`cancel` 是**协作式**的，队列里的任务立即
+摘掉，正在跑的在下个检查点（下载是每章开始之前）退出。
 
 ### 测试
 
@@ -662,6 +703,7 @@ CLI 就地跑和后台 worker 走同一份，不会出现「两边对失败的�
 
 各版本的实际达成情况以 [docs/progress.md](docs/progress.md) 为准。
 
+[1.0.0rc3]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc3
 [1.0.0rc2]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc2
 [1.0.0rc1]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc1
 [1.0.0rc0]: https://github.com/luoqingciya/mograb/releases/tag/v1.0.0rc0

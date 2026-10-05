@@ -167,6 +167,14 @@ class TaskManager:
         await self._queue.put(task)
         return task
 
+    def is_cancelled(self, task_id: str) -> bool:
+        """这个任务被请求取消了吗。
+
+        **同步的**，给正在跑任务的代码用 —— 调度器在逐章循环里查它，
+        那里不适合引入 await 点。见 `DownloadScheduler` 的 `should_stop`。
+        """
+        return self._pool.is_cancelled(task_id)
+
     async def cancel(self, task_id: str) -> Task:
         """取消任务。"""
         task = await self.get(task_id)

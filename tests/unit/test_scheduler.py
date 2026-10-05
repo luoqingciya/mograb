@@ -23,6 +23,7 @@ from mograb.errors import (
     SourceExecutionError,
     SourceNotFoundError,
     SourceUnsupportedError,
+    TaskCancelledError,
 )
 from mograb.source.engine import BookDraft, ChapterDraft
 from mograb.task.scheduler import DownloadScheduler
@@ -597,3 +598,61 @@ class TestUnhandledException:
         assert report.failed == 1
         assert report.failures[0].code == "UNEXPECTED"
         assert report.downloaded == 1
+
+
+class TestCancellation:
+    """取消要能打断**正在跑**的下载。
+
+    原先只有 `TaskRunner` 在进 handler 之前查一次取消标志，而下载一跑就是
+    几十分钟 —— `mog task cancel` 于是只改了状态、下载照跑不误。
+    用户实测：取消后事件流仍在推进 174/2036 → 188/2036。
+
+    修法是给调度器一个 `should_stop` 回调，在**拿到信号量之后、发请求之前**
+    检查。
+    """
+
+    async def test_取消后抛_TaskCancelledError(self) -> None:
+        scheduler, engine, _, _, _ = make_scheduler()
+
+        async def run() -> None:
+            await scheduler.run("book_1", should_stop=lambda: True)
+
+        with pytest.raises(TaskCancelledError):
+            await run()
+
+        # 一章都不该抓
+        assert engine.content_calls == []
+
+    async def test_取消后不再继续抓(self) -> None:
+        """**这条是重点** —— 取消发生在中途时，后面的章节不该再发请求。"""
+        engine = FakeEngine(drafts=make_drafts(20))
+        scheduler, _, _, _, _ = make_scheduler(engine=engine)
+        seen = 0
+
+        def should_stop() -> bool:
+            # 抓够 4 章就喊停
+            return seen >= 4
+
+        original = engine.fetch_content
+
+        async def counting(source, chapter_url, *, chapter_index=None):
+            nonlocal seen
+            seen += 1
+            return await original(source, chapter_url, chapter_index=chapter_index)
+
+        engine.fetch_content = counting  # type: ignore[method-assign]
+
+        with pytest.raises(TaskCancelledError):
+            await scheduler.run("book_1", should_stop=should_stop)
+
+        # 并发度是 2，所以喊停那一刻可能已经又起了几章；
+        # 关键是**远小于 20**，而不是全部抓完
+        assert seen < 20
+
+    async def test_不传_should_stop_时行为不变(self) -> None:
+        """CLI 就地跑任务时不传它 —— 取消靠 Ctrl+C 杀进程。"""
+        scheduler, _, _, _, _ = make_scheduler()
+
+        report = await scheduler.run("book_1")
+
+        assert report.downloaded == 3

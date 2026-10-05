@@ -39,13 +39,12 @@ content:
 
 ## 现在做到哪了
 
-版本 `1.0.0rc2`（**预发布**）。规范已经定下来，**整条链路都通了** ——
-命令行能装书源、搜书、下载、增量更新、导出，还能在已下载的正文里搜关键词
-（`mog find`，纯本地）；本地 API 在同一套 Core 上跑起来了；
-桌面端最小闭环可用。
+版本 `1.0.0rc3`（**预发布**）。规范已经定下来，**整条链路都通了** ——
+装书源、搜书、下载、增量更新、导出、在已下载的正文里搜关键词（纯本地），
+全部有命令行入口；本地 API 在同一套 Core 上跑起来了；桌面端最小闭环可用。
 
-**真实站点跑通过一本**：`bqgnovels.com` 的书源，完整目录 1453 章，
-端到端下载 7 章 / 76,725 字，TXT / Markdown / EPUB 三种导出都正常。
+**真实站点跑通过一整本**：`bqgnovels.com` 的书源，完整目录 1453 章，
+端到端下载 **2036 章 / 451 万字**，0 失败，TXT / Markdown / EPUB 三种导出都正常。
 
 标成 rc 而不是正式版，是因为**真实站点只验证过一个**——那是最简单的一类
 （Nuxt SSR、内容直出 HTML）。还没遇到过需要 JS 渲染的、有真实反爬的、
@@ -61,35 +60,217 @@ CLI · API        已实现（含鉴权）
 桌面端           最小闭环
 ```
 
-654 个测试通过，覆盖率 85%，Ruff 与 Pyright 干净，CI 全绿。
+708 个测试通过，覆盖率 85.7%，Ruff 与 Pyright 干净，CI 全绿。
 
 缺口、里程碑对照和下一步看 **[项目进度](docs/progress.md)** —— 进度信息只在那份文档里维护。
 
-## 上手
+## 怎么用
 
-需要 Python 3.11+ 和 [uv](https://github.com/astral-sh/uv)。
-最终用户不用装这些，发布包自带运行时。
+**推荐命令行。** 三条路用的都是同一套 Core，行为和产物完全一致，但完成度不一样：
+
+| | 命令行 | 桌面端 | 本地 API |
+|---|---|---|---|
+| 搜索书源 | ✅ | ✅ | ✅ |
+| 下载 | ✅ | ✅ 只能从搜索结果点 | ✅ |
+| 任务进度 | ✅ | ✅ | ✅ |
+| 增量更新 / 导出 | ✅ | ⬜ 未接 | ✅ |
+| 书架 / 章节浏览 | ✅ | ⬜ 占位页 | ✅ |
+| 书源管理 | ✅ | ⬜ 占位页 | ✅ |
+| 设置 | ✅ | ⬜ 占位页 | ✅ |
+| 本地全文搜索 | ✅ | ⬜ 未接 | ✅ |
+
+桌面端目前只有**搜索**和**下载**两个页面能用，书架、书源管理、设置都还是占位页。
+**所以推荐命令行** —— 它是功能最全、最稳的入口。桌面端和 API 是给
+「想要界面」和「想自己写客户端」的场景准备的。
+
+### 方式一：用发布包（推荐）
+
+到 [Releases](https://github.com/luoqingciya/mograb/releases) 下载
+`MoGrab-CLI-v<版本>-win-x64.zip`（Linux 用 `.tar.gz`），解压即用：
+
+```
+MoGrab-CLI/
+├── mog.exe
+├── _internal/
+└── data/          ← 首次运行自动创建
+```
+
+**自带 Python 运行时，不需要装 Python、uv 或任何依赖。**
+整个目录可以拷到 U 盘上带走，`data/` 跟着走。
+
+### 方式二：从源码跑（开发用）
+
+需要 Python 3.11+ 和 [uv](https://github.com/astral-sh/uv)：
 
 ```bash
 git clone https://github.com/luoqingciya/mograb.git
 cd mograb
 uv sync --all-packages
 
-# 校验一个书源
-uv run mog source lint tests/fixtures/example-source/source.yaml
-
-# 跑测试
-uv run pytest -q
+uv run mog --help          # 跑 CLI
+uv run pytest -q           # 跑测试
 ```
 
-`mog source lint` 的输出：
+开发时数据落在 `<仓库根>/data/`（已在 `.gitignore` 里排除），
+和发布包的 `<程序目录>/data/` 是同一套逻辑。
+
+### 方式三：桌面端（Windows）
+
+到 Releases 下载 `MoGrab-Setup-v<版本>-win-x64.exe` 安装，
+或 `MoGrab-v<版本>-win-x64.zip` 解压直接用。
+
+桌面端内置后端 sidecar，启动后自己拉起来，不用手工开服务。
+
+## 命令行教程
+
+下面按「第一次用」的顺序走一遍。**书源要自己准备** —— 项目不内置任何书源，
+理由见下面的「不做什么」。
+
+### 1. 装一个书源
+
+书源是一份 YAML，描述怎么从某个站点取书。
+
+```bash
+mog source install my-source.yaml
+mog source list
+```
 
 ```
-Source: example
-Schema: PASS
-Semantic: PASS
+┌───────────┬─────────────────────┬───────┬────────────────────────────┬──────┐
+│ ID        │ 名称                │ 版本  │ 能力                       │ 状态 │
+├───────────┼─────────────────────┼───────┼────────────────────────────┼──────┤
+│ bqgnovels │ 笔趣阁（bqgnovels） │ 1.0.0 │ search,book,chapters,cont… │ 正常 │
+└───────────┴─────────────────────┴───────┴────────────────────────────┴──────┘
+```
 
-Result: READY
+写书源的工具链：
+
+```bash
+mog source init my-source          # 脚手架，产物直接能过 lint
+mog source lint my-source          # 只查规则能不能编译
+mog source test my-source          # 用离线快照真跑一遍提取，查结果是否为空
+mog source doctor bqgnovels        # 对着真实站点体检
+```
+
+### 2. 搜书
+
+```bash
+mog search 斗罗大陆
+```
+
+```
+┌───────────┬────────────────────┬──────────────┬──────────────────────────────┐
+│ 来源      │ 书名               │ 作者         │ URL                          │
+├───────────┼────────────────────┼──────────────┼──────────────────────────────┤
+│ bqgnovels │ 斗罗大陆3龙王传说  │ 唐家三少     │ https://…/book/49907         │
+└───────────┴────────────────────┴──────────────┴──────────────────────────────┘
+用 `mog download --url <URL> --source <来源>` 下载
+```
+
+### 3. 下载
+
+```bash
+mog download --url https://www.bqgnovels.com/book/49907 --source bqgnovels
+```
+
+进度条就地刷新，跑完打印结果：
+
+```
+⠦ 下载章节 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2036/2036 0:35:03
+完成：新下载 2036 章，失败 0 章，共 2036 章
+本地已有 2036 章 / 4512103 字
+```
+
+**中断了直接重跑同一条命令**，已下过的章节会跳过（增量 diff 按章节 ID / URL /
+序号三路匹配，站点改版换了链接也能对上）。
+
+### 4. 查书架、读章节
+
+`book_id` 是一串 ULID，记不住 —— **不给 ID 就是书架列表**：
+
+```bash
+mog book
+```
+
+```
+┌─────────────────────────────────┬───────────────────┬──────────┬──────┬────────────┐
+│ ID                              │ 书名              │ 作者     │ 章节 │ 更新       │
+├─────────────────────────────────┼───────────────────┼──────────┼──────┼────────────┤
+│ book_01M4590M0VAKH0ND8G62G8G290 │ 斗罗大陆3龙王传说 │ 唐家三少 │ 2036 │ 2026-10-05 │
+└─────────────────────────────────┴───────────────────┴──────────┴──────┴────────────┘
+用 `mog book <ID>` 看详情（含字数），`mog export <ID>` 导出
+```
+
+```bash
+mog book book_01M4590M0VAKH0ND8G62G8G290                 # 详情
+mog book book_01M4590M0VAKH0ND8G62G8G290 --chapters      # 章节列表
+mog book book_01M4590M0VAKH0ND8G62G8G290 --chapter 1     # 读第 1 章正文
+```
+
+### 5. 导出
+
+```bash
+mog export --format epub book_01M4590M0VAKH0ND8G62G8G290
+```
+
+```
+已导出 → …\data\exports\唐家三少 - 斗罗大陆3龙王传说.epub
+```
+
+支持 `txt` / `markdown` / `epub`。输出路径默认按配置里的模板生成，
+也可以用 `--output` 指定。忘了导到哪去了就查任务详情：
+
+```bash
+mog task list                       # 找那条 export_book
+mog task show <task_id>             # 参数里带 path
+```
+
+### 6. 在已下载的正文里搜
+
+```bash
+mog find 荔枝
+```
+
+纯本地、不联网，搜的是**已下载的章节正文**（和 `mog search` 搜书源是两件事）。
+
+### 7. 盯着一个任务
+
+`mog download` 是就地跑、跑完就退出。如果是通过 API 或桌面端起的任务，
+或者想另开一个窗口盯着：
+
+```bash
+mog task watch <task_id>     # 盯着一个，进终态自动退出
+mog task watch               # 盯着所有，Ctrl+C 停
+```
+
+```
+task_585c00a1c9474198   download_book   running   119/2036
+task_585c00a1c9474198   download_book   running   121/2036
+task_585c00a1c9474198   download_book   success   2036/2036
+```
+
+```bash
+mog task pause <task_id>     # 暂停
+mog task resume <task_id>    # 继续
+mog task cancel <task_id>    # 取消
+```
+
+> 这几条和 `watch` 一样**需要本地 server 在跑**（`mog server start`）——
+> 任务状态在 server 进程的内存里。`mog download` 不需要。
+
+### 其它
+
+```bash
+mog update <book_id>              # 增量更新
+mog cache stats                   # 缓存占用
+mog config show                   # 当前生效的配置
+mog server start                  # 起本地 API
+```
+
+**所有命令都支持 `--json`**，方便脚本接：
+
+```bash
+mog book --json | jq '.[0].id'
 ```
 
 ## 数据放在哪
@@ -103,6 +284,7 @@ Result: READY
 ├── _internal/
 └── data/
     ├── config.toml
+    ├── token            ← API 访问令牌，首次启动自动生成
     ├── mograb.db
     ├── cache/
     ├── covers/
@@ -111,7 +293,7 @@ Result: READY
     └── sources/
 ```
 
-开发时从仓库根运行，数据落在 `<仓库根>/data/`，已经在 `.gitignore` 里排除。
+开发时从仓库根运行，数据落在 `<仓库根>/data/`。
 
 想改位置就设 `MOGRAB_HOME`。
 
@@ -207,6 +389,10 @@ MoGrab 是个人工具，不是通用爬虫框架。以下明确不做：
 - 复杂反爬对抗、验证码破解
 - 绕过付费墙或访问控制
 - 多用户服务器、移动端、分布式爬虫
+
+**也不内置任何书源。** 书源描述的是针对具体站点的抓取规则，
+随主仓库分发容易让项目被误解成「某个站点的专用工具」，也会把站点改版、
+失效、条款变动带进仓库历史。规范、引擎和工具链在这里，书源由你自己写、自己留。
 
 ## 使用须知
 

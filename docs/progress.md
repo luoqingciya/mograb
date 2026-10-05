@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc2`（预发布）
+> 更新于 2026-10-05 · 当前版本 `1.0.0rc3`（预发布）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -21,8 +21,8 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 707 | `uv run pytest --collect-only -q \| tail -1` |
-| 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
+| 测试用例 | 710 | `uv run pytest --collect-only -q \| tail -1` |
+| 覆盖率 | 85.7% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 13,400（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
 | 测试行数 | 约 7,700 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
@@ -212,18 +212,25 @@
 **就地跑**（进程结束就退出），不走 server。导出作业照样写 `exports` 表，
 所以 `GET /exports` 和 `mog task list` 都能看到。
 
-### 待裁决：取消跑不动正在进行的下载
+### 取消跑不动正在进行的下载 —— 已修
 
-`mog task cancel` 返回 200、数据库里状态也变成 `cancelled`，但**下载还在继续**。
-实测：取消后事件流仍在推进 `174/2036 → 188/2036`。
+`mog task cancel` 原先返回 200、数据库里状态也变成 `cancelled`，
+但**下载还在继续**（实测：取消后事件流仍推进 `174/2036 → 188/2036`）。
 
 根因是 `TaskRunner` 只在**进入 handler 之前**检查一次 `is_cancelled`，
-而 `DownloadScheduler` 的逐章循环里**没有任何取消检查** ——
+而 `DownloadScheduler` 的逐章循环里没有任何取消检查 ——
 `_pool.cancel_task()` 设的那个标志中途没人看。
 
-表现是「静默地做错事」：命令说成功了，任务却没停。要修得给调度器加一个
-`should_stop` 之类的回调（和 `on_progress` 一样的形状），属于行为改动，
-先记下来等裁决。
+修法：给调度器加 `should_stop` 回调（和 `on_progress` 同形状，**同步的**），
+在**拿到并发信号量之后、发请求之前**检查。位置有讲究：放在最前面的话，
+所有协程在开工那一刻就检查完了，后来的取消谁也看不见。
+
+同时把 `asyncio.gather` 换成 `TaskGroup` —— 取消时 gather 会把其余协程
+**丢在后台继续跑**（它只抛第一个异常，不取消兄弟）。注意 TaskGroup 会把
+异常包成 `ExceptionGroup`，而 `TaskRunner` 是按 `except TaskCancelledError`
+判断的，得先拆开，否则取消会被当成「意料之外的失败」标成 FAILED。
+
+实测：取消后任务标成 `cancelled [TASK_CANCELLED]`，事件流也停了。
 
 **Alembic 迁移目录没建。** 依赖声明了，但 `alembic/` 目录和首个迁移脚本还没有。
 现在 schema 是 `create_all` 建的，改表就得手写迁移。

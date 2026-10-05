@@ -261,6 +261,10 @@ class Application:
         report = await self.scheduler.run(
             book_id,
             on_progress=self._progress_hook or self._progress(task),
+            # 取消要能打断**正在跑**的下载。原先只有 TaskRunner 在进 handler
+            # 之前查一次标志，而下载一跑就是几十分钟 —— `mog task cancel`
+            # 于是只改了状态、下载照跑。见 DownloadScheduler.should_stop。
+            should_stop=lambda: self.task_manager.is_cancelled(task.id),
         )
 
         task.total = report.plan.total

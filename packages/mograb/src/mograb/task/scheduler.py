@@ -41,6 +41,7 @@ from ..errors import (
     MoGrabError,
     SourceNotFoundError,
     SourceUnsupportedError,
+    TaskCancelledError,
 )
 from ..export.base import Exporter
 from ..logging.setup import get_logger
@@ -50,6 +51,13 @@ from ..storage.repository import BookRepository, ChapterRepository, SourceReposi
 _logger = get_logger(__name__)
 
 ProgressCallback = Callable[[int, int], Awaitable[None]]
+
+StopCheck = Callable[[], bool]
+"""返回 True 表示该停了。
+
+**同步的**：它在每章的下载协程里调用，不该引入额外的 await 点。
+调用方（`Application._handle_download`）查的是内存里的取消标志，本来就同步。
+"""
 """进度回调，参数是 ``(已完成, 总数)``。Task Worker 接它来推 SSE。"""
 
 
@@ -317,12 +325,16 @@ class DownloadScheduler:
         book_id: str,
         *,
         on_progress: ProgressCallback | None = None,
+        should_stop: StopCheck | None = None,
         export_to: Path | None = None,
     ) -> DownloadReport:
         """执行完整下载流程（§18）。
 
         Args:
             on_progress: 每章结束后回调 ``(已完成, 总数)``，用于推进度。
+            should_stop: 返回 True 就中断，抛 :class:`TaskCancelledError`。
+                **取消一个正在跑的下载靠它** —— 没有它的话 `mog task cancel`
+                只改状态，下载照跑不误。
             export_to: 给了就在落库后导出到这个路径。路径由调用方按配置和
                 模板算好 —— 调度器不该知道配置文件长什么样。
         """
@@ -335,7 +347,7 @@ class DownloadScheduler:
             return report
 
         chapters, failures = await self._download_chapters(
-            source.spec, book.id, plan.to_download, on_progress
+            source.spec, book.id, plan.to_download, on_progress, should_stop
         )
         report.failures = failures
         report.failed = len(failures)
@@ -415,12 +427,17 @@ class DownloadScheduler:
         book_id: str,
         drafts: list[ChapterDraft],
         on_progress: ProgressCallback | None,
+        should_stop: StopCheck | None = None,
     ) -> tuple[list[Chapter], list[ChapterFailure]]:
         """并发下载一批章节。
 
         并发度取书源自己的 ``network.concurrency``。注意网络层还有一道按书源
         隔离的限流器，这里再加信号量是为了**限制在途协程数量** ——
         一本三千章的书如果一次性铺开，内存和连接数都不好看。
+
+        ``should_stop`` 在**拿到信号量之后、发请求之前**检查。放这个位置
+        有讲究：放在最前面的话，所有协程在开工那一刻就检查完了，
+        后来的取消谁也看不见。
         """
         semaphore = asyncio.Semaphore(max(1, spec.network.concurrency))
         total = len(drafts)
@@ -429,6 +446,8 @@ class DownloadScheduler:
         async def fetch_one(draft: ChapterDraft) -> Chapter | ChapterFailure:
             nonlocal done
             async with semaphore:
+                if should_stop is not None and should_stop():
+                    raise TaskCancelledError("下载已取消")
                 try:
                     return await self._fetch_chapter(spec, book_id, draft)
                 except MoGrabError as exc:
@@ -446,7 +465,23 @@ class DownloadScheduler:
                     if on_progress is not None:
                         await on_progress(done, total)
 
-        results = await asyncio.gather(*(fetch_one(draft) for draft in drafts))
+        # 用 TaskGroup 而不是 gather：取消时 gather 会把其余协程**丢在后台继续跑**
+        # （它只把第一个异常抛出来，不取消兄弟），TaskGroup 会一起取消并等干净。
+        # 章节级的失败不抛异常（`fetch_one` 收进 ChapterFailure），
+        # 所以这里的取消语义不会误伤正常的失败收集。
+        try:
+            async with asyncio.TaskGroup() as group:
+                running = [group.create_task(fetch_one(draft)) for draft in drafts]
+        except BaseExceptionGroup as group_error:
+            # **TaskGroup 会把异常包成 ExceptionGroup**，而 TaskRunner 是按
+            # `except TaskCancelledError` 判断的 —— 不拆开的话取消会被当成
+            # 「意料之外的失败」，任务标成 FAILED 而不是 CANCELLED。
+            cancelled = group_error.subgroup(TaskCancelledError)
+            if cancelled is not None:
+                raise TaskCancelledError("下载已取消") from None
+            raise
+
+        results = [task.result() for task in running]
         chapters = [r for r in results if isinstance(r, Chapter)]
         failures = [r for r in results if isinstance(r, ChapterFailure)]
         return chapters, failures
