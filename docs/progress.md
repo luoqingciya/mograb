@@ -217,10 +217,58 @@
 **Electron 侧没有 lint。** 只有 tsc 类型检查。渲染层的 SSE 解析器有单元测试
 （`apps/desktop/test/sse.test.mjs`），其余靠类型和人工验证。
 
+## 真实站点验证怎么做
+
+每验证一个新站点，按这个清单走一遍。**光看「命令没报错」是不够的** ——
+下载能跑完但内容残缺、章节重复、编码坏掉，都不会报错。
+
+**一、抓取层**
+
+```bash
+mog source test sources/<id>      # 离线快照：提取结果是否为空
+mog search <关键词>                # 真实搜索能不能出结果
+mog download --url <书籍页> --source <id>
+```
+
+**二、数据层**（直接查库，别只看 CLI 的汇总数字）
+
+| 检查 | 怎么查 | 期望 |
+|------|--------|------|
+| 章节数 | `COUNT(*)` | 与站点目录一致 |
+| URL 唯一 | `COUNT(DISTINCT url)` | 等于章节数 |
+| index 连续 | `MAX(index)-MIN(index)+1` | 等于章节数 |
+| 空正文 | `content IS NULL OR content=''` | 0 |
+| 零字数 | `word_count=0` | 0 |
+
+> 重复**标题**不一定是问题。站点把一章拆成两页时标题会重样 ——
+> 要看 URL 和 `content_hash` 是否不同。bqgnovels 的 2036 章里有 54 个重名标题，
+> 全是这种拆分，不是重复下载。
+
+**三、导出层**
+
+```bash
+mog export --format txt <book_id>
+mog export --format epub <book_id>
+```
+
+EPUB 逐项验（`unzip` 出来看）：
+
+- `mimetype` 是**第一条**且**未压缩**（`unzip -v` 里显示 `Stored`），内容是
+  `application/epub+zip`
+- `META-INF/container.xml` 指向 `OEBPS/content.opf`
+- `content.opf` 的 manifest 项数 = 章节数 + toc/样式等附属文件；
+  **spine 项数 = 章节数**
+- `toc.ncx` / `toc.xhtml` 存在
+- 抽查若干章：`<p>` 段落正常、无 `&lt;` / `&nbsp;` / `<div>` 残留
+- 没有异常小的章节文件（空章会是几百字节）
+
+TXT 检查：开头有书名/作者/简介，章节间有分隔线，文件是合法 UTF-8。
+
+---
+
 ## 下一步
 
 按依赖顺序：
-
 1. **再验证几个不同类型的真实站点** —— 补上 JS 渲染、反爬、GBK 编码、
    页码式翻页这几类，才能说「书源规范够用」。
 2. **桌面端补全页面** —— 书架、书源管理、设置。架构已验证，照着加就行。
