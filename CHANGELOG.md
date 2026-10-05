@@ -17,6 +17,28 @@ TXT 与 EPUB 都是合法 UTF-8。全文 0 失败。
 
 ### 新增
 
+**`mog task watch` —— 走 SSE 实时跟踪任务。** 补上最后一块 API/CLI 能力差：
+`GET /tasks/events` 和 `GET /tasks/{id}/events` 两个事件流端点，CLI 一直没有
+对应的东西。给 ID 就盯着那一个、进终态自动退出；不给则跟着所有任务。
+
+传输层不用 `EventSource`（它设不了请求头，令牌只能走 `Authorization`），
+和桌面端一样手写 SSE 解析。心跳帧要丢掉 —— 它只有 `task_id`、没有 `status`，
+当成事件推出去会渲染出空行，而心跳每 15 秒来一次。
+
+**`mog book <ID> --chapter <序号>` —— 读单章正文。** 对应
+`GET /books/{id}/chapters/{cid}`，CLI 原先没有这条路，想读一章只能先导出整本。
+
+仓储层加了 `ChapterRepository.get_by_index()`：**不能拿 `list_by_book` 再筛**，
+那个会把整本书的正文读进内存 —— 几千章就是几十兆，只为读一章不值得。
+
+正文渲染带 `soft_wrap` —— Rich 默认按终端宽度硬折，会在句子中间插换行
+（实测「所以
+，我决定」）。正文已经按段落分好行了。
+
+**`mog task show` 显示任务参数。** 导出任务的**输出路径**就在参数里，
+原先不显示 —— 用户关掉终端就再也找不回导出的文件了（API 的 `GET /exports`
+是有 `path` 的）。
+
 **`mog book` 不给 ID 时列出书架。** 用户报的：「导出书籍需要 `book_id`，
 但是我们没有查看的命令」。
 
@@ -36,6 +58,28 @@ API 那边一直有 `GET /api/v1/books`，CLI 没暴露 —— **API-First 的�
 字数在 `mog book <ID>` 的详情里有。
 
 ### 修复
+
+**SSE 从来不发进度事件。** 这是第六处「声明了没接线」，而且是用户看不见的那种：
+
+`Application._progress` 的 docstring 写着「API server 推 SSE 时读的是同一个
+对象」，但进度变化**没有任何广播** —— 状态通知（`TaskRunner._notify`）只在
+状态跃迁时触发。于是整个下载过程只在「开始」和「结束」各推一条，
+中间什么都没有。
+
+而桌面端的任务页写着「进页面时拉一次 /tasks，之后靠 SSE 推更新」、
+**没有轮询** —— 它的进度条会从 0 直接跳到完成。
+
+修法是给 `Application` 加一个 `_progress_listener`，API 把它接到自己的
+`publish_task` 上。**限流 1 秒一条**：逐章推会把事件流灌满（三千章就是三千条），
+而进度条 1 秒刷一次已经够顺；最后一次不受限流约束，免得进度停在 99%。
+
+实测验证：真跑一次下载，`mog task watch` 收到
+`1/2036 → 119/2036 → … → 149/2036` 连续事件。
+
+**API 文档里的 SSE 契约和实现对不上。** 文档写的是
+`event: progress` / `data: {"speed":3.4}` 和四种事件类型
+（`progress` / `status` / `error` / `done`），实现里只有 `task` + `heartbeat`
+两种，也没有 `speed`、没有 `seq`。按实际改正了。
 
 **`mog --help` 中英混排。** 面板标题是 `Options` / `Commands`，三条选项说明是
 英文：

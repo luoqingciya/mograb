@@ -17,6 +17,7 @@ CLI 和 API 要的是同一套东西：数据库、仓储、HTTP 客户端、书
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -53,6 +54,13 @@ from .task.manager import TaskManager
 from .task.runner import StatusCallback, TaskHandler, TaskRunner
 from .task.scheduler import DownloadScheduler, ProgressCallback
 
+PROGRESS_NOTIFY_INTERVAL_SECONDS = 1.0
+"""进度通知的最小间隔。
+
+逐章推事件会把 SSE 流灌满（一本三千章的书就是三千条），而进度条
+1 秒刷一次已经够顺。**最后一次不受限流约束** —— 否则进度会停在 99%。
+"""
+
 _logger = get_logger(__name__)
 
 
@@ -87,6 +95,13 @@ class Application:
 
     # 命令行显示进度用。只对 run_task 生效，见那里的说明。
     _progress_hook: ProgressCallback | None = field(default=None, init=False, repr=False)
+
+    # 进度变化时的额外通知。**API 用它推 SSE。**
+    #
+    # 和 `_progress_hook` 分开：那个是「画进度条」（收 done/total），
+    # 这个是「广播进度」（收整个 Task）。API 直接把它接到自己的
+    # `publish_task` 上 —— 和状态跃迁走同一条广播路径。
+    _progress_listener: StatusCallback | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -327,11 +342,31 @@ class Application:
 
         只改内存里的对象，不逐章写库 —— 一本三千章的书会有三千次写库，
         为了进度条不值当。API server 推 SSE 时读的是同一个对象。
+
+        **进度变了要通知 `_progress_listener`。** 这里原先只改对象、不通知，
+        而状态通知（`TaskRunner._notify`）只在状态跃迁时触发 —— 于是 SSE
+        只在「开始」和「结束」各推一条，中间什么都没有。桌面端的任务页
+        没有轮询、全靠 SSE，进度条因此会从 0 直接跳到完成。
+
+        通知**限流**：逐章推会把事件流灌满（几千条），而进度条 1 秒刷一次
+        已经够顺。最后一次（`done == total`）不受限流约束，免得进度停在 99%。
         """
+        last_notified = 0.0
 
         async def on_progress(done: int, total: int) -> None:
+            nonlocal last_notified
             task.completed = done
             task.total = total
+
+            listener = self._progress_listener
+            if listener is None:
+                return
+
+            now = time.monotonic()
+            if done < total and now - last_notified < PROGRESS_NOTIFY_INTERVAL_SECONDS:
+                return
+            last_notified = now
+            await listener(task)
 
         return on_progress
 

@@ -18,6 +18,8 @@ server 要求 ``Authorization: Bearer <token>``。令牌由 server 启动时生�
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -128,3 +130,77 @@ __all__ = [
     "is_running",
     "request",
 ]
+
+
+def parse_sse_data(line: str) -> dict[str, Any] | None:
+    """解析一行 SSE，取出任务事件。
+
+    SSE 一帧长这样（``sse_starlette`` 用 CRLF）：
+
+        event: task
+        id: task_xxx
+        data: {"task_id": "...", "status": "running", ...}
+
+    只看 ``data:`` 行。**心跳帧要被丢掉** —— 它只有 ``task_id``、没有
+    ``status``，当成事件推出去会让调用方渲染出一个空行。
+
+    Returns:
+        事件字典；这一行不是有效的事件数据时返回 ``None``。
+    """
+    if not line.startswith("data:"):
+        return None
+    payload = line[len("data:") :].strip()
+    if not payload:
+        return None
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict) or "status" not in event:
+        return None
+    return event
+
+
+async def stream_task_events(
+    settings: AppSettings, task_id: str | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """订阅任务事件流（SSE）。
+
+    ``task_id`` 为空就订阅全局流（所有任务）。
+
+    **不用 ``EventSource``** —— 它设不了请求头，而令牌只能走
+    ``Authorization``（见 ADR-0004）。所以这里用 httpx 读流、手写解析，
+    和桌面端 ``renderer/sse.ts`` 的做法一致。
+
+    Yields:
+        每个事件的字典。心跳帧会被过滤掉 —— 它没有 ``status`` 字段。
+
+    Raises:
+        ApiUnavailable: 连不上，或流中途断了。
+        ApiUnauthorized: 令牌不对。
+    """
+    path = f"/tasks/{task_id}/events" if task_id else "/tasks/events"
+    url = f"{api_base_url(settings)}{path}"
+
+    try:
+        # timeout=None：长连接，不能按普通请求的超时算
+        async with (
+            httpx.AsyncClient(timeout=None) as client,
+            client.stream("GET", url, headers=auth_headers()) as response,
+        ):
+            if response.status_code == 401:
+                raise ApiUnauthorized(response.text)
+            response.raise_for_status()
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:") :].strip()
+                if not payload:
+                    continue
+                event = json.loads(payload)
+                # 心跳帧只有 task_id，没有 status
+                if isinstance(event, dict) and "status" in event:
+                    yield event
+    except httpx.HTTPError as exc:
+        raise ApiUnavailable(str(exc)) from exc

@@ -196,6 +196,14 @@ class SqliteChapterRepository:
             rows = (await session.execute(stmt)).scalars().all()
             return [_to_chapter(r) for r in rows]
 
+    async def get_by_index(self, book_id: str, index: int) -> Chapter | None:
+        async with self._db.session() as session:
+            stmt = select(ChapterRow).where(
+                ChapterRow.book_id == book_id, ChapterRow.index == index
+            )
+            row = (await session.execute(stmt)).scalars().first()
+            return _to_chapter(row) if row else None
+
     async def list_identities(self, book_id: str) -> list[tuple[str, str]]:
         """返回 ``(identity_key, content_hash)`` 列表，供增量 diff 使用。"""
         async with self._db.session() as session:

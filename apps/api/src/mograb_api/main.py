@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with create_application(settings=settings) as application:
         # 换掉默认的 TaskManager：加上广播钩子，并启动 worker 池。
         # start() 同时会做一次孤儿任务恢复。
+        # 进度变化也要广播 —— 只靠状态跃迁的话 SSE 只在「开始」和「结束」
+        # 各推一条，中间什么都没有，而桌面端没有轮询、全靠这个流。
+        # 详见 Application._progress。
+        application._progress_listener = publish_task
+
         application.task_manager = build_task_manager(application, on_status_change=publish_task)
         await application.task_manager.start()
 

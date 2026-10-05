@@ -21,11 +21,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 687 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 707 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 13,100（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 7,400 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 源码行数 | 约 13,400（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 7,700 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（8 个 job） | `gh run list` |
@@ -181,15 +181,49 @@
 自动跑一遍，CI 有独立的 `package-smoke` job，Release 工作流也会跑。
 这条已经从缺口变成防线。
 
-**CLI 与 API 的能力要对齐 —— 两个方向都要查。** 已经各栽过一次：
+**CLI 与 API 的能力要对齐 —— 两个方向都要查。** 已经各栽过三次：
 
 - `mog find` 只有 CLI，API 没有对应端点（补了 `GET /api/v1/search/local`）
 - 书架列表只有 API 有（`GET /api/v1/books`），CLI 没有 ——
   于是用户下载完就再也找不回 `book_id`，`mog export` 用不了
+- 章节正文、导出作业的输出路径、任务事件流，都只有 API 有
 
 项目的原则是 **API-First，API 是正式产品接口**，但「CLI 有的 API 也得有」
 只是其中一半；**API 有的 CLI 也得有**，否则命令行用户寸步难行。
-加新能力时两边都过一遍。
+加新能力时两边都过一遍。2026-10-05 全量核对过一次，27 个端点逐个对，
+结果记在下面。
+
+### API ↔ CLI 能力对照（2026-10-05 核对）
+
+| API 能力 | CLI |
+|---------|-----|
+| `GET /health` | `mog server status` |
+| 书源：列出/详情/安装/卸载/启停/体检/重扫 | `mog source *` |
+| 搜索（书源 / 本地正文） | `mog search` / `mog find` |
+| 书架 / 详情 / 章节列表 | `mog book [<ID>] [--chapters]` |
+| 章节正文 | `mog book <ID> --chapter <序号>` |
+| 增量更新 | `mog update` |
+| 导出（创建） | `mog export`（本地跑，不经 API） |
+| 导出作业列表 / 状态（含输出路径） | `mog task list` / `mog task show` |
+| 任务列表 / 详情 / 暂停 / 继续 / 取消 / 重试 | `mog task *` |
+| 任务事件流（SSE ×2） | `mog task watch` |
+
+**已知的实现路径差异（不是缺陷）**：`mog export` 和 `mog download` 在 CLI 里
+**就地跑**（进程结束就退出），不走 server。导出作业照样写 `exports` 表，
+所以 `GET /exports` 和 `mog task list` 都能看到。
+
+### 待裁决：取消跑不动正在进行的下载
+
+`mog task cancel` 返回 200、数据库里状态也变成 `cancelled`，但**下载还在继续**。
+实测：取消后事件流仍在推进 `174/2036 → 188/2036`。
+
+根因是 `TaskRunner` 只在**进入 handler 之前**检查一次 `is_cancelled`，
+而 `DownloadScheduler` 的逐章循环里**没有任何取消检查** ——
+`_pool.cancel_task()` 设的那个标志中途没人看。
+
+表现是「静默地做错事」：命令说成功了，任务却没停。要修得给调度器加一个
+`should_stop` 之类的回调（和 `on_progress` 一样的形状），属于行为改动，
+先记下来等裁决。
 
 **Alembic 迁移目录没建。** 依赖声明了，但 `alembic/` 目录和首个迁移脚本还没有。
 现在 schema 是 `create_all` 建的，改表就得手写迁移。

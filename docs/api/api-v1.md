@@ -434,24 +434,43 @@ Accept: text/event-stream
 事件格式：
 
 ```
-event: progress
-id: 42
-data: {"task_id":"task_1a2b3c4d","completed":520,"total":1000,"speed":3.4}
+event: task
+id: task_1a2b3c4d
+data: {"event":"task","task_id":"task_1a2b3c4d","type":"download_book","status":"running",
+       "book_id":"book_01M459...","total":2036,"completed":339,"failed":0,
+       "error_code":null,"error_message":null}
 
 event: heartbeat
-id: 43
-data: {"task_id":null,"seq":43}
+data: {"task_id":null}
 ```
 
-| 事件类型 | 说明 |
-|---------|------|
-| `progress` | 进度更新 |
-| `status` | 状态变更 |
-| `error` | 任务失败 |
-| `done` | 任务完成（终态） |
-| `heartbeat` | 心跳（默认 15 秒，防止代理断开） |
+| 字段 | 说明 |
+|------|------|
+| `event` | 固定 `task`。心跳帧是 `heartbeat`，**没有 `status` 字段** |
+| `status` | `pending` / `running` / `paused` / `retrying` / `success` / `failed` / `cancelled` |
+| `total` / `completed` / `failed` | 进度。`total` 为 0 表示还没算出总数 |
+| `error_code` / `error_message` | 只在失败时有值 |
+
+**两类帧都会发**，订阅方按「有没有 `status`」区分 —— 心跳只是保活，
+没有业务含义。
+
+**什么时候发**：
+
+- 任务**状态跃迁**时（→ running、→ 终态）
+- **进度变化时**，但**限流到 1 秒一条**（`PROGRESS_NOTIFY_INTERVAL_SECONDS`）。
+  逐章推会把流灌满 —— 一本三千章的书就是三千条事件。
+  最后一次不受限流约束，免得订阅方看到进度停在 99%。
+
+> 进度事件是后补的。原先只有状态跃迁才推，于是整个下载过程只在首尾各推
+> 一条，中间什么都没有 —— 而 Desktop 的任务页没有轮询、全靠这个流，
+> 进度条会从 0 直接跳到完成。见 CHANGELOG。
 
 **第一版不使用 WebSocket** —— SSE 对单向进度通知已足够。
+
+**订阅方式**：令牌只能走 `Authorization` 头，所以**不能用 `EventSource`**
+（它设不了请求头），要 `fetch` 读流。Desktop 在
+`apps/desktop/src/renderer/sse.ts`，CLI 在 `mog task watch`
+（`mograb_cli/commands/_api.py` 的 `stream_task_events`）。
 
 ---
 

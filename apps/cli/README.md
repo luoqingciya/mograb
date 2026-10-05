@@ -18,8 +18,10 @@ mog source   list | show | lint | test | install | remove
 mog search   <keyword>              去书源上搜书
 mog find     <keyword>              在本地已下载的正文里搜
 mog book     [<book-id>]            不给 ID 时列出书架
+             [--chapters]           列出章节
+             [--chapter <序号>]     读某一章正文
 mog download <book-id> | --url <URL> --source <ID>
-mog task     list | show | pause | resume | cancel | retry
+mog task     list | show | watch | pause | resume | cancel | retry
 mog update   <book-id>
 mog export   <book-id> --format txt|markdown|epub
 mog cache    stats | clear | clear-source
@@ -34,6 +36,11 @@ mog logs
 `mog book` 不给 ID 就是书架列表 —— `mog export` / `mog update` 都要 `book_id`，
 而那个 ID 是 ULID（`book_01M459...`），没人记得住。所以列表里 **ID 一定完整显示**，
 不会被终端宽度截断（表格里那条列设了 `no_wrap`）。
+
+`mog task watch` 走 SSE 实时跟踪任务，**需要 server 在跑**（和 pause/resume
+一样，事件流是 server 进程里的事）。给 ID 就盯着那一个、进终态自动退出；
+不给则跟着所有任务，Ctrl+C 停。`mog download` 那种就地跑的任务不在这里 ——
+它自己画进度条。
 
 `mog source test` 只接受**路径**不接受 ID —— 快照是开发期产物，
 安装时不复制到数据目录。详见规范 §12.3。

@@ -21,7 +21,10 @@ DEFAULT_LIMIT = 50
 @command
 async def info(
     book_id: str | None = typer.Argument(None, help="MoGrab 书籍 ID。不填则列出全部书籍"),
-    chapters: bool = typer.Option(False, "--chapters", "-c", help="一并列出章节（需给 ID）"),
+    chapters: bool = typer.Option(False, "--chapters", "-c", help="列出章节（需给 ID）"),
+    chapter: int | None = typer.Option(
+        None, "--chapter", help="读某一章正文，序号同 --chapters 列出的那个"
+    ),
     limit: int = typer.Option(
         DEFAULT_LIMIT, "--limit", "-n", min=1, max=500, help="列表模式下最多显示几本"
     ),
@@ -29,10 +32,18 @@ async def info(
 ) -> None:
     """查看书籍详情；不给 ID 时列出已下载的全部书籍。"""
     if book_id is None:
-        if chapters:
-            console.print("[red]--chapters 要配合 book_id 用[/red]")
+        if chapters or chapter is not None:
+            console.print("[red]--chapters / --chapter 要配合 book_id 用[/red]")
             raise typer.Exit(code=2)
         await _list_books(limit=limit, json_output=json_output)
+        return
+
+    if chapters and chapter is not None:
+        console.print("[red]--chapters 和 --chapter 不能一起用[/red]")
+        raise typer.Exit(code=2)
+
+    if chapter is not None:
+        await _read_chapter(book_id, chapter, json_output=json_output)
         return
 
     async with open_app() as application:
@@ -78,8 +89,54 @@ async def info(
 
     if listing:
         console.print()
-        for chapter in listing:
-            console.print(f"  {chapter.index:>5}  {chapter.title}")
+        for item in listing:
+            console.print(f"  {item.index:>5}  {item.title}")
+        console.print("[dim]用 `mog book <ID> --chapter <序号>` 读正文[/dim]")
+
+
+async def _read_chapter(book_id: str, index: int, *, json_output: bool) -> None:
+    """读一章正文。
+
+    按序号取单章 —— 别用 ``list_by_book`` 再筛，那会把整本书的正文
+    都读进内存（几千章就是几十兆），只为看一章不值得。
+    """
+    async with open_app() as application:
+        book = await application.books.get(book_id)
+        if book is None:
+            raise EntityNotFoundError(f"书籍不存在: {book_id}", details={"book_id": book_id})
+        found = await application.chapters.get_by_index(book_id, index)
+
+    if found is None:
+        raise EntityNotFoundError(
+            f"章节不存在: 序号 {index}（共 {book.chapter_count} 章）",
+            details={"book_id": book_id, "index": index},
+        )
+
+    emit(
+        {
+            "book_id": book.id,
+            "book_title": book.title,
+            "id": found.id,
+            "index": found.index,
+            "title": found.title,
+            "url": found.url,
+            "word_count": found.word_count,
+            "content": found.content,
+        },
+        json_output=json_output,
+    )
+    if json_output:
+        return
+
+    console.print(f"[bold]{found.title}[/bold]")
+    console.print(f"[dim]{book.title} · 第 {found.index} 章 · {found.word_count} 字[/dim]")
+    console.print()
+    # 三个都要：
+    # - soft_wrap：正文已经按段落分好行，Rich 再按终端宽度硬折会在句子中间
+    #   插换行（实测「所以\n，我决定」）。让终端自己软折。
+    # - markup：正文里出现 `[...]` 会被 Rich 当标记语言吞掉。
+    # - highlight：免得把正文里的数字、引号染上色。
+    console.print(found.content, soft_wrap=True, markup=False, highlight=False)
 
 
 async def _list_books(*, limit: int, json_output: bool) -> None:

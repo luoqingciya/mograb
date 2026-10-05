@@ -681,3 +681,68 @@ class TestBookCommand:
         assert run("source", "install", example_yaml).exit_code == 0
 
         assert run("book", "nope").exit_code == 3
+
+
+class TestReadChapter:
+    """``mog book <ID> --chapter <序号>`` —— 读单章正文。
+
+    对应 API 的 ``GET /api/v1/books/{id}/chapters/{cid}``。CLI 原先没有这条路，
+    想读一章只能先导出整本。
+    """
+
+    @pytest.fixture
+    def seeded(self, example_yaml: str) -> None:
+        assert run("source", "install", example_yaml).exit_code == 0
+        _seed_chapter()
+
+    def test_读到正文(self, seeded: None) -> None:
+        result = run("book", "book_t", "--chapter", "0")
+
+        assert result.exit_code == 0
+        assert "第一章 科学边界" in result.stdout
+        assert "鲜荔枝" in result.stdout
+
+    def test_json_带完整正文(self, seeded: None) -> None:
+        payload = json.loads(run("book", "book_t", "--chapter", "0", "--json").stdout)
+
+        assert payload["index"] == 0
+        assert payload["title"] == "第一章 科学边界"
+        assert "鲜荔枝" in payload["content"]
+        assert payload["book_id"] == "book_t"
+
+    def test_正文不被硬折行(self, seeded: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        """正文已按段落分好行，Rich 再按宽度硬折会在句子中间插换行。
+
+        实测过：「……所以\n，我决定……」。所以那行 print 必须带 ``soft_wrap``。
+        窄终端下才看得出来，所以这里显式压窄。
+        """
+        monkeypatch.setenv("COLUMNS", "30")
+
+        result = run("book", "book_t", "--chapter", "0")
+
+        assert "汪淼接到一个差事，要去看看鲜荔枝。" in result.stdout
+
+    def test_序号不存在(self, seeded: None) -> None:
+        result = run("book", "book_t", "--chapter", "999")
+
+        assert result.exit_code == 3
+        # 领域错误走 stderr（`fail()` 用 err_console）—— stdout 留给正文，
+        # 这样 `mog book <ID> --chapter 0 > 章节.txt` 不会把错误也写进文件
+        assert "章节不存在" in result.stderr
+
+    def test_书不存在(self, seeded: None) -> None:
+        assert run("book", "nope", "--chapter", "0").exit_code == 3
+
+    def test_和_chapters_不能同时用(self, seeded: None) -> None:
+        result = run("book", "book_t", "--chapters", "--chapter", "0")
+
+        assert result.exit_code == 2
+
+    def test_不给_ID_时是参数错误(self) -> None:
+        assert run("book", "--chapter", "0").exit_code == 2
+
+    def test_章节列表末尾有读正文的提示(self, seeded: None) -> None:
+        result = run("book", "book_t", "--chapters")
+
+        assert result.exit_code == 0
+        assert "--chapter" in result.stdout

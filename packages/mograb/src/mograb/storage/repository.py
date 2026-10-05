@@ -78,6 +78,14 @@ class ChapterRepository(Protocol):
 
     async def list_by_book(self, book_id: str) -> list[Chapter]: ...
 
+    async def get_by_index(self, book_id: str, index: int) -> Chapter | None:
+        """按序号取单章（含正文）。
+
+        **别用 ``list_by_book`` 再筛** —— 那个会把整本书的正文都读进内存，
+        一本几千章的书就是几十兆。只为读一章不值得。
+        """
+        ...
+
     async def list_identities(self, book_id: str) -> list[tuple[str, str]]: ...
 
     async def stats_by_book(self, book_id: str) -> tuple[int, int]:
