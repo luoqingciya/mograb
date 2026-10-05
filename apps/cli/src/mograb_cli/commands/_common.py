@@ -128,6 +128,23 @@ def set_verbose(value: bool) -> None:
     _verbose = value
 
 
+def _print_log(text: str) -> None:
+    """把一行日志交给 CLI 的 Rich console 输出。
+
+    **别改成直接写 stderr。** 进度条在 stdout 上不停重画当前行，日志另写
+    stderr 的话两者不协调 —— 日志会糊在进度条中间，实测长这样：
+
+        ⠴ 下载章节 ━━━━ 339/2036 0:06:062026-10-05T13:42:38 [warning] http.retry …
+
+    走同一个 Console 之后，Rich 知道有 Live 区域，会把日志排在进度条**上方**。
+
+    ``markup=False`` 是必须的：日志正文里出现 ``[xxx]``（URL、错误码）会被
+    Rich 当成标记语言解析并吞掉。``highlight=False`` 同理，免得把 URL 里的
+    数字染上色。
+    """
+    console.print(text, markup=False, highlight=False, soft_wrap=False)
+
+
 @asynccontextmanager
 async def open_app() -> AsyncIterator[Application]:
     """打开一个装配好的应用，用完自动收尾。
@@ -141,6 +158,7 @@ async def open_app() -> AsyncIterator[Application]:
     """
     async with create_application(
         log_level="INFO" if _verbose else "WARNING",
+        log_sink=_print_log,
     ) as app:
         yield app
 

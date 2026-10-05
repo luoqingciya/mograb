@@ -21,11 +21,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 655 | `uv run pytest --collect-only -q \| tail -1` |
+| 测试用例 | 668 | `uv run pytest --collect-only -q \| tail -1` |
 | 覆盖率 | 85% | `uv run pytest --cov --cov-report=term` |
 | 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
 | 源码行数 | 约 12,800（另有桌面端 TS 约 1,500 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 6,970 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
+| 测试行数 | 约 7,200 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
 | 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
 | CI | 全绿（8 个 job） | `gh run list` |
@@ -151,11 +151,23 @@
 
 ### 中
 
-**真实站点只验证过一个。** `bqgnovels.com` 的书源跑通了（1453 章完整目录、
-正文清洗干净），但那是 Nuxt SSR 站点、内容直出 HTML，属于**最简单的一类**。
+**真实站点只验证过两个，而且都是简单类型。** `bqgnovels.com` 的书源跑通了：
+
+| 验证 | 规模 | 结果 |
+|------|------|------|
+| 目录抓取 | 1453 章 / 15 页 | 分页正确 |
+| 全量下载 | 2036 章 / 451 万字 | **0 失败**，35 分钟 |
+| EPUB 导出 | 2037 个 xhtml / 8.7 MB | 结构合规，正文无残留 |
+
+但那是 Nuxt SSR 站点、内容直出 HTML，属于**最简单的一类**。
 还没遇到过的：需要 JS 渲染的、有真实反爬的、用 GBK 编码的、
 目录分页方式不是「下一页链接」的。书源分页目前只支持「跟着下一页链接走」，
 遇到靠页码规律翻页的站点还需要扩展。
+
+**站点是抖的，长下载必然遇到重试。** 那次 2036 章的下载里，
+`http.retry` 警告出现了 8 次（全部重试成功，最终 0 失败）。
+这不算缺陷，但意味着**重试是常态而不是异常** —— 相关的输出、日志级别、
+以及「重试期间进度条要正常」都得按常态对待。
 
 **Source Registry 没实现 —— 这是明确的决定，不是遗漏。** 书源分发只有本地安装
 （`mog source install <file>`）能用。原始规划书 §13、§55、§56 描述的远端流程

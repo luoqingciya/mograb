@@ -5,6 +5,60 @@
 
 版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
 
+## [未发布]
+
+第一次真实站点全量下载（`bqgnovels.com` 的《斗罗大陆3龙王传说》，
+2036 章 / 451 万字）暴露出来的问题。
+
+**下载本身的结果是干净的**：2036 章对应 2036 个不同 URL、index 连续无缺口、
+0 空正文、0 零字数；EPUB 通过结构校验（`mimetype` 是 STORED、
+container / OPF / NCX 齐全、2037 个 xhtml）、正文无 HTML 残留；
+TXT 与 EPUB 都是合法 UTF-8。全文 0 失败。
+
+### 修复
+
+**`download.proxy` 是第五处「声明了没接线」。** `HttpClientConfig.proxy`
+一直存在、也传给了 httpx，但 settings 里没有它、`config.toml` 模板里也没有 ——
+所以**永远是 `None`**。用户实测时「不挂代理搜索失败、挂了才成功」，
+撞的正是这里。
+
+现在接进 `[download] proxy`，并在 README 里写清两条路：配置文件，
+或者环境变量 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（httpx 的
+`trust_env` 默认开着，这条**本来就可用，只是没人知道**）。
+
+**日志糊在进度条中间。** 长下载时看到的输出是这样：
+
+```
+⠴ 下载章节 ━━━━ 339/2036 0:06:062026-10-05T13:42:38 [warning] http.retry attempt=1 …
+```
+
+进度条在 stdout 上不停重画当前行，日志另写 stderr，两个写入者不协调。
+现在 CLI 把日志交给**同一个 Rich console**（`configure_logging(console_sink=...)`），
+Rich 知道有 Live 区域，会把日志排在进度条**上方**。
+
+核心库不依赖 Rich，所以这里传的是回调而不是 Console 对象。
+
+**`configure_logging` 会静默失效。** `logging.basicConfig()` 在根 logger
+已有 handler 时**什么都不做** —— 不带 `force=True` 的话整个日志配置被跳过，
+一个 handler 都装不上，而且不报错。写这批测试时撞到过：
+pytest 先挂了自己的 handler，注入的通道完全没生效。
+
+「配了等于没配，还不报错」正是这个项目反复在防的那类问题。
+
+### 测试
+
+**`test_pause_without_server_explains` 不再依赖「默认端口空闲」。**
+它原先跑的是 `mog task pause`，靠「48721 上没人监听」这个隐含假设 ——
+开发者本地开着 `mog server start` 就会挂，而且报错信息完全指不到原因。
+现在用环境变量指到一个确定空闲的端口。
+
+新增 `tests/unit/test_settings.py`（配置接线）和
+`tests/unit/test_logging_sink.py`（日志落点）两个文件，共 13 个用例。
+
+> 顺带记两个写测试时踩的坑：`setup_module` 是 pytest 的**保留钩子名**，
+> 拿它当模块别名会被当成钩子调用；断言带颜色的日志前要么剥 ANSI、
+> 要么直接用 `json_output=True`，往源码里塞字面 ESC 字符会被编辑器吃掉。
+
 ## [1.0.0rc2] - 2026-10-05
 
 **rc1 的发布包是坏的，这一版修掉。** 两个产物都打不开数据库：

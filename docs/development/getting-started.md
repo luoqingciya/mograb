@@ -32,7 +32,7 @@ uv run pre-commit install       # 安装 Git 钩子
 
 ```bash
 uv run mog --version            # mog (MoGrab) 1.0.0rc2
-uv run pytest -q                # 654 passed
+uv run pytest -q                # 666 passed
 uv run ruff check .             # All checks passed!
 uv run pyright                  # 0 errors
 ```

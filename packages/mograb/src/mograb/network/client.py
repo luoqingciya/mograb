@@ -75,6 +75,12 @@ class HttpClientConfig:
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     verify_ssl: bool = True
     proxy: str | None = None
+    """显式代理地址，如 ``http://127.0.0.1:7890``。
+
+    留 ``None`` 时 httpx 仍会读环境变量（``HTTP_PROXY`` / ``HTTPS_PROXY`` /
+    ``ALL_PROXY``）—— ``trust_env`` 没关。两条路都能用，配置项优先级更高。
+    """
+
     user_agent: str | None = None
     max_redirects: int = 5
     allow_domains: frozenset[str] = field(default_factory=frozenset)

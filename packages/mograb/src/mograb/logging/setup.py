@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -77,12 +77,31 @@ def _redact_mapping(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+class _SinkHandler(logging.Handler):
+    """把渲染好的日志行交给调用方给的回调。
+
+    用于让日志和 Rich 进度条共用同一个 console —— 详见
+    :func:`configure_logging` 的 ``console_sink``。
+    """
+
+    def __init__(self, sink: Callable[[str], None]) -> None:
+        super().__init__()
+        self._sink = sink
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._sink(self.format(record))
+        except Exception:
+            self.handleError(record)
+
+
 def configure_logging(
     *,
     level: str = "INFO",
     log_dir: Path | None = None,
     json_output: bool = False,
     console: bool = True,
+    console_sink: Callable[[str], None] | None = None,
 ) -> None:
     """初始化日志系统（幂等）。
 
@@ -91,6 +110,15 @@ def configure_logging(
         log_dir: 若提供，则写入轮转文件 ``app.log`` / ``task.log`` / ``source.log``。
         json_output: 是否输出 JSON 行（适合机器解析）。
         console: 是否输出到 stderr。
+        console_sink: 控制台日志的落点。给了就用它代替写 stderr。
+
+            **这是给进度条场景准备的。** 默认直接写 stderr，而 Rich 的进度条
+            在 stdout 上不断重画当前行 —— 两个写入者不协调，日志会糊在进度条
+            中间（实测：``339/2036 0:06:06<日志>attempt=1 delay=0.85``）。
+            调用方传一个「往它自己的 Rich console 打」的函数进来，
+            Rich 就知道有 Live 区域，会把日志排在进度条**上方**。
+
+            核心库不依赖 Rich，所以这里是回调而不是 Console 对象。
     """
     global _configured
     if _configured:
@@ -98,7 +126,9 @@ def configure_logging(
 
     handlers: list[logging.Handler] = []
     if console:
-        handlers.append(logging.StreamHandler(sys.stderr))
+        handlers.append(
+            _SinkHandler(console_sink) if console_sink else logging.StreamHandler(sys.stderr)
+        )
 
     if log_dir is not None:
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +141,13 @@ def configure_logging(
             )
             handlers.append(handler)
 
-    logging.basicConfig(level=level, handlers=handlers, format="%(message)s")
+    # **必须 force=True。** 不带它的话，只要根 logger 上已经有别的 handler，
+    # basicConfig 就**什么都不做** —— 整个日志配置静默失效，一个 handler
+    # 都装不上，而且不报错。写测试时撞到过：pytest 会先挂自己的 handler，
+    # 于是这里装的控制台通道完全没生效。
+    #
+    # 「配了等于没配，还不报错」正是这个项目反复在防的那类问题。
+    logging.basicConfig(level=level, handlers=handlers, format="%(message)s", force=True)
 
     renderer: Any = (
         structlog.processors.JSONRenderer(ensure_ascii=False)

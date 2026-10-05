@@ -17,7 +17,7 @@ CLI 和 API 要的是同一套东西：数据库、仓储、HTTP 客户端、书
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -389,6 +389,7 @@ async def create_application(
     settings: AppSettings | None = None,
     paths: Paths | None = None,
     log_level: str | None = None,
+    log_sink: Callable[[str], None] | None = None,
 ) -> AsyncIterator[Application]:
     """装配出一个可用的应用，退出时自动清理。
 
@@ -402,6 +403,9 @@ async def create_application(
         paths: 不传就按运行目录解析。
         log_level: 覆盖日志级别。CLI 默认要安静，会传 ``WARNING``；
             不传则用配置里的值。
+        log_sink: 控制台日志的落点。CLI 传自己的 Rich console 打印函数，
+            这样日志会和进度条**共用同一个 console**，Rich 会把日志排在
+            进度条上方而不是糊在它中间。见 :func:`configure_logging`。
     """
     resolved_settings = settings or load_settings()
     resolved_paths = paths or get_paths()
@@ -412,6 +416,7 @@ async def create_application(
         level=log_level or resolved_settings.logging.level,
         log_dir=resolved_paths.logs_dir,
         json_output=resolved_settings.logging.json_output,
+        console_sink=log_sink,
     )
 
     database = Database(resolved_paths.database)
@@ -441,6 +446,7 @@ async def create_application(
             timeout_ms=resolved_settings.download.timeout_ms,
             retry=RetryPolicy(max_retries=resolved_settings.download.retry),
             user_agent=BUILTIN_VARS["user_agent"],
+            proxy=resolved_settings.download.proxy,
         ),
         cache=cache if resolved_settings.cache.enabled else None,
         limiters=limiters,

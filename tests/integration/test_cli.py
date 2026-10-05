@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,16 @@ from mograb_cli.main import app
 pytestmark = pytest.mark.integration
 
 runner = CliRunner()
+
+
+def _free_port() -> int:
+    """要一个当前空闲的端口。
+
+    绑 0 让内核分配，拿到号就立刻释放 —— 测试只关心「这个端口上没人监听」。
+    """
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def run(*args: str):
@@ -268,9 +279,18 @@ class TestTaskCommands:
     def test_bad_status_filter(self) -> None:
         assert run("task", "list", "--status", "nonsense").exit_code != 0
 
-    def test_pause_without_server_explains(self) -> None:
-        """没有 server 时要给人话，不是堆栈。"""
+    def test_pause_without_server_explains(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """没有 server 时要给人话，不是堆栈。
+
+        **必须换一个确定空闲的端口。** 原先直接跑，靠的是「默认端口 48721
+        上没人监听」这个隐含假设 —— 开发者本地开着 `mog server start`
+        就会挂，而且报错信息完全指不到原因。端口从 settings 读，
+        所以用环境变量覆盖。
+        """
+        monkeypatch.setenv("MOGRAB_SERVER__PORT", str(_free_port()))
+
         result = run("task", "pause", "whatever")
+
         assert result.exit_code == 1
         assert "没在运行" in result.stdout
 

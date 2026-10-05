@@ -115,6 +115,40 @@ Result: READY
 
 想改位置就设 `MOGRAB_HOME`。
 
+## 配置
+
+配置文件是 `data/config.toml`，`mog config init` 生成带注释的模板，
+`mog config show` 看当前生效的值。
+
+最常改的几项：
+
+```toml
+[download]
+concurrency = 4          # 全局并发上限
+retry = 3                # 单请求重试次数
+timeout_ms = 15000
+# proxy = "http://127.0.0.1:7890"
+
+[cache]
+enabled = true
+max_size = "5GB"
+ttl_seconds = 1800
+```
+
+**代理**有两条路，都行：
+
+1. `[download] proxy = "http://127.0.0.1:7890"` —— 写进配置文件
+2. 环境变量 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` —— 不填配置时自动读
+
+第 2 条对「本机挂了 TUN 模式代理」之外的场景够用，比如只给 MoGrab 单独走代理：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890 mog download --url ... --source ...
+```
+
+所有配置项都支持环境变量覆盖，前缀 `MOGRAB_`、嵌套用 `__`，
+例如 `MOGRAB_DOWNLOAD__CONCURRENCY=8`、`MOGRAB_SERVER__PORT=9000`。
+
 ## 结构
 
 ```

@@ -60,6 +60,10 @@ class DownloadSettings(BaseModel):
     retry: int = Field(default=3, ge=0, le=10)
     request_interval_ms: int = Field(default=500, ge=0, le=60_000)
     timeout_ms: int = Field(default=15_000, ge=100, le=120_000)
+    proxy: str | None = Field(
+        default=None,
+        description="HTTP(S) 代理，如 http://127.0.0.1:7890。不填则看环境变量",
+    )
 
 
 # 按单位长度从长到短排 —— 否则 "512mb" 会先匹配到 "b"
@@ -211,6 +215,10 @@ per_source_concurrency = 2
 retry = 3
 request_interval_ms = 500
 timeout_ms = 15000
+
+# 代理。留空则交给 httpx 读环境变量（HTTP_PROXY / HTTPS_PROXY / ALL_PROXY）。
+# 站点在墙外、或本机走了 TUN 模式代理时，这条通常不用填。
+# proxy = "http://127.0.0.1:7890"
 
 [cache]
 enabled = true
