@@ -247,6 +247,24 @@ Windows 上目录叫 `mog`、可执行文件叫 `mog.exe`，不冲突；Linux �
 `mog`，逐个往外搬时第一个就撞上自己。`scripts/build.py` 的 `flatten_dist()`
 先挪到临时目录再搬，`tests/unit/test_build_script.py` 盯着这段逻辑。
 
+**CI 上的 CLI 输出带 ANSI 颜色，本地不带 —— 断言前必须剥掉。**
+Typer 的 `rich_utils` 里有一句：
+
+```python
+FORCE_TERMINAL = True if getenv("GITHUB_ACTIONS") or getenv("FORCE_COLOR") or getenv("PY_COLORS") else None
+```
+
+CI 里 `GITHUB_ACTIONS` 恒为 true，于是**强制开终端模式**，输出全是转义序列。
+断言 `"─ 选项 ─" in output` 在本地过、在 CI 挂 —— 实际拿到的是
+`─ \x1b[1m选项\x1b[0m ─`。
+
+已经在 `tests/unit/test_localize.py` 上炸过一次。**写涉及 CLI 输出的断言时，
+先剥 ANSI**（那个文件里的 `_plain()`），并且**本地用 `GITHUB_ACTIONS=true` 跑一遍**：
+
+```bash
+GITHUB_ACTIONS=true uv run pytest tests/integration/test_cli.py tests/unit/test_localize.py
+```
+
 **`uvicorn.run` 别传字符串。** `uvicorn.run("mograb_api.main:app", ...)` 靠运行时
 导入，PyInstaller 静态分析看不到，打出来的 exe 启动就报找不到模块。传 app 对象。
 
