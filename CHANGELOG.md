@@ -7,6 +7,26 @@
 
 ## [未发布]
 
+### 新增
+
+**`mog init` —— 显式初始化数据目录。**
+
+数据目录原先只在**第一次跑某个命令**时顺带建出来（`create_application()` 里的
+`paths.ensure()` + `init_schema()`）。这留下一个空档：
+
+- 没有任何一条命令的职责是「把环境准备好」。想在跑别的命令之前先往
+  `data/sources/` 里放几个书源，只能自己 mkdir。
+- `mog config init` **只写 `config.toml`，不建子目录** —— 名字容易被当成
+  初始化命令，实际不是（实测：跑完只有 `config.toml` 一个文件）。
+
+`mog init` 建目录树（`cache` / `covers` / `exports` / `logs` / `sources`）
++ 数据库表 + API 令牌 + 日志文件，**幂等**，可重复执行。它走的是同一条路
+（`create_application()`）—— 项目规定那是唯一的 composition root，
+初始化步骤不该有第二份实现。
+
+**刻意不做成 API 端点。** API server 启动时自己就会初始化（它得先有数据目录
+才起得来），再暴露一个「帮我建数据目录」的端点没有意义。
+
 ### 修复
 
 **搜索换了关键词却拿到上一次的结果 —— 缓存键漏了查询参数。**

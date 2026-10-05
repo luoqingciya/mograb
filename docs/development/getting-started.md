@@ -32,6 +32,7 @@ uv run pre-commit install       # 安装 Git 钩子
 
 ```bash
 uv run mog --version            # mog (MoGrab) 1.0.0rc7
+uv run mog init                 # 建出数据目录，幂等
 uv run pytest -q                # 786 passed, 1 skipped
 uv run ruff check .             # All checks passed!
 uv run pyright                  # 0 errors

@@ -13,6 +13,7 @@ uv run mog search "三体" --json
 ## 命令结构
 
 ```
+mog init                            初始化数据目录（幂等）
 mog source   list | show | lint | test | install | remove
              enable | disable | rescan | doctor | init
 mog search   <keyword>              去书源上搜书

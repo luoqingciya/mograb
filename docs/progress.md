@@ -203,7 +203,7 @@ cover / publisher / created_at`，并注明「允许用户通过模板配置」�
 
 | 应用 | 状态 | 说明 |
 |------|------|------|
-| `apps/cli` | 完成 | 12 组命令 |
+| `apps/cli` | 完成 | 13 组命令 |
 | `apps/api` | 完成 | 24 条路径 / 28 个端点（含 2 条 SSE），全部要求 Bearer 令牌 |
 | `apps/desktop` | 最小闭环 | 搜索 → 下载 → 任务进度可用；书架 / 书源 / 设置是占位 |
 
@@ -293,6 +293,10 @@ rc3 又漏了 `shellingham.nt`（Typer 的补全探测按 `os.name` 动态导入
 **已知的实现路径差异（不是缺陷）**：`mog export` 和 `mog download` 在 CLI 里
 **就地跑**（进程结束就退出），不走 server。导出作业照样写 `exports` 表，
 所以 `GET /exports` 和 `mog task list` 都能看到。
+
+`mog init` 同样只有 CLI。它建的是本地数据目录，而 **API server 启动时自己
+就会做同一件事**（`create_application()` 里的 `paths.ensure()` + `init_schema()`）
+—— 它得先有数据目录才起得来，再暴露一个「帮我建数据目录」的端点没有意义。
 
 ### 取消跑不动正在进行的下载 —— 已修
 

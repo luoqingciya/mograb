@@ -94,7 +94,7 @@ CLI · API        已实现（含鉴权）
 MoGrab-CLI/
 ├── mog.exe
 ├── _internal/
-└── data/          ← 首次运行自动创建
+└── data/          ← 首次运行自动创建，也可 `mog init` 显式建出来
 ```
 
 **自带 Python 运行时，不需要装 Python、uv 或任何依赖。**
@@ -127,6 +127,28 @@ uv run pytest -q           # 跑测试
 
 下面按「第一次用」的顺序走一遍。**书源要自己准备** —— 项目不内置任何书源，
 理由见下面的「不做什么」。
+
+### 0. 准备数据目录（可选）
+
+数据目录会在第一次跑命令时自动建出来。想先把它建好（比如要提前把书源文件
+放进 `data/sources/`），或者只是想确认环境装对了：
+
+```bash
+mog init
+```
+
+```
+已创建 数据目录 /path/to/data
+  cache    /path/to/data/cache
+  covers   /path/to/data/covers
+  exports  /path/to/data/exports
+  logs     /path/to/data/logs
+  sources  /path/to/data/sources
+  数据库表已建好，API 令牌已就位
+  查看令牌：`mog server token`　生成配置模板：`mog config init`
+```
+
+幂等，可以重复执行。目录结构见 `mog config path`。
 
 ### 1. 装一个书源
 

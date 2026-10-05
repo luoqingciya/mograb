@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import socket
 import threading
 from contextlib import contextmanager
@@ -46,6 +47,59 @@ def run(*args: str):
 @pytest.fixture
 def example_yaml(example_source_dir: Path) -> str:
     return str(example_source_dir / "source.yaml")
+
+
+class TestInitCommand:
+    """``mog init`` —— 显式初始化数据目录。
+
+    原先数据目录只在第一次跑命令时**顺带**建出来，没有任何一条命令的职责是
+    「把环境准备好」；而 ``mog config init`` 只写 config.toml、不建子目录。
+    """
+
+    def test_creates_full_data_tree(self) -> None:
+        paths = get_paths()
+        # conftest 只建了数据根目录，子目录都还没有
+        assert not paths.sources_dir.exists()
+
+        result = run("init")
+
+        assert result.exit_code == 0
+        for directory in (
+            paths.cache_dir,
+            paths.covers_dir,
+            paths.exports_dir,
+            paths.logs_dir,
+            paths.sources_dir,
+        ):
+            assert directory.is_dir(), f"{directory} 没建出来"
+        # 数据库表与 API 令牌也要就位 —— 它们才是「初始化完了」的标志
+        assert paths.database.is_file()
+        assert paths.token_file.is_file()
+
+    def test_idempotent(self) -> None:
+        """可以重复跑，第二次要报告「已就绪」而不是「已创建」。"""
+        assert run("init").exit_code == 0
+
+        again = run("init")
+
+        assert again.exit_code == 0
+        assert "已就绪" in again.stdout
+
+    def test_reports_first_time(self) -> None:
+        """数据根目录不存在时报告「已创建」。"""
+        paths = get_paths()
+        shutil.rmtree(paths.root)
+
+        payload = json.loads(run("init", "--json").stdout)
+
+        assert payload["created"] is True
+
+    def test_json_reports_paths(self) -> None:
+        payload = json.loads(run("init", "--json").stdout)
+        paths = get_paths()
+
+        assert payload["data_dir"] == str(paths.root)
+        assert set(payload["directories"]) == {"cache", "covers", "exports", "logs", "sources"}
 
 
 class TestSourceCommands:

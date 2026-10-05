@@ -39,6 +39,7 @@ from .commands import (
     download,
     export,
     find,
+    init,
     logs,
     search,
     server,
@@ -96,6 +97,7 @@ app.add_typer(config.app, name="config", help="配置管理")
 app.add_typer(server.app, name="server", help="本地 API Server")
 
 # 注册单命令
+app.command("init", help="初始化数据目录")(init.init)
 app.command("search", help="搜索小说")(search.search)
 app.command("book", help="查看书籍（不给 ID 时列出书架）")(book.info)
 app.command("download", help="下载书籍")(download.download)
