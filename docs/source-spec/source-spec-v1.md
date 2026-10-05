@@ -211,13 +211,32 @@ Linter 会在静态检查阶段报出该错误。
 
 | 写法 | 类型 | 说明 |
 |------|------|------|
-| `.book-item` | CSS | CSS 选择器 |
-| `a@href` | CSS + 属性 | 选择器 + 取属性；`@text` 表示取文本 |
+| `.book-item` | CSS | CSS 选择器。**默认取纯文本**，且空白会被归一化 |
+| `a@href` | CSS + 属性 | 选择器 + 取属性 |
 | `@href` | 属性 | 作用于当前上下文节点 |
-| `@text` | 文本 | 当前节点文本 |
+| `@text` | 文本 | 当前节点文本，等同于默认行为 |
+| `div@html` | CSS + HTML | 取**含子节点的 HTML 源码**，见下 |
+| `@own_text` | 文本 | 只要节点自己的直接文本，不含子节点的 |
 | `xpath://div[@id='c']` | XPath | |
 | `jsonpath:$.data[*].title` | JSONPath | |
 | `regex:第(\d+)章` | 正则 | 取第 1 捕获组；无捕获组则取整体 |
+
+#### `@html` 什么时候必须写
+
+默认行为是 `node.text_content()` **再归一化空白** —— 段落边界（`<p>` 的起止、
+`<br>`）在这一步就没了，整段正文会连成一行。
+
+所以**凡是后面要用 `remove_html` 的地方，body 规则必须带 `@html`**：
+`remove_html` 的全部意义就是「先把块级/`<br>` 边界换成 `\n` 再删标签」，
+喂给它纯文本时它无事可做。`content.body` 几乎总是属于这一类：
+
+```yaml
+content:
+  body: "#content@html"    # 不是 "#content"
+```
+
+写成 `#content` 不会报错，也不会 lint 失败 —— 只是导出的小说每章都变成一段。
+这是**静默失效**，踩过一次。
 
 ### 5.2 列表提取（`result`）
 
@@ -453,12 +472,14 @@ urljoin("https://site/search", "三体")  →  "https://site/三体"    ← 不�
 
 ```yaml
 content:
-  body: "#content"
+  body: "#content@html"          # @html 不能省，理由见 §5.1
   clean:
     remove: ["script", "style", ".advert", ".chapter-nav"]
 ```
 
 `clean.remove` 是 CSS 选择器列表，在**DOM 级**删除匹配节点（发生在正文提取之前）。
+正因为清洗发生在提取之前、而 `remove_html` 发生在之后，`body` 才必须取 HTML
+而不是纯文本 —— 否则段落边界在提取那一步就已经丢了。
 
 除书源声明的规则外，引擎内置以下通用清洗（无需每个书源重复声明）：
 

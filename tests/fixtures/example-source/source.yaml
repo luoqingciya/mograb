@@ -115,7 +115,13 @@ content:
     method: GET
     url: "{{chapter.url}}"
   body:
-    selector: "#content"
+    # **必须带 @html。** 只写 "#content" 拿到的是纯文本，段落边界（<p> 的
+    # 起止、<br>）在那一步就没了，后面的 remove_html 无从下手 —— 整章会
+    # 变成一段。见规范 §5.1「@html 什么时候必须写」。
+    #
+    # 字典写法只是「字符串写法」的另一种拼法，只读 selector 一个键；
+    # 写成 {selector: "#content", html: true} 会被静默忽略。
+    selector: "#content@html"
   clean:
     remove:
       - "script"
@@ -123,9 +129,10 @@ content:
       - ".advert"
       - ".chapter-nav"
   transform:
+    # 这里**不要**接 normalize_whitespace —— 它会把 remove_html 刚造出来的
+    # 换行一起折叠掉，整章又糊成一行。规范 §6.1 明确警告过这一条。
     - trim
     - remove_html
-    - normalize_whitespace
 
 # ---------------------------------------------------------------------------
 # 全局变换（作用于所有能力的提取结果）
