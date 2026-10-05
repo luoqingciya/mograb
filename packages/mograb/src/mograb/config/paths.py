@@ -26,8 +26,7 @@ MoGrab 是**绿色便携**的：运行期数据全部放在运行目录下的 ``
     └── data/                           ← 数据（可整体备份或删除）
         ├── config.toml
         ├── token                       ← API 访问令牌（自动生成，0600）
-        ├── mograb.db
-        ├── cache/
+        ├── mograb.db                   ← 书 / 章节 / 任务 / HTTP 缓存都在这里
         ├── covers/
         ├── logs/
         ├── exports/
@@ -52,15 +51,17 @@ DATA_DIRNAME = "data"
 CONFIG_FILENAME = "config.toml"
 TOKEN_FILENAME = "token"
 DATABASE_FILENAME = "mograb.db"
-CACHE_DIRNAME = "cache"
 COVERS_DIRNAME = "covers"
 LOGS_DIRNAME = "logs"
 EXPORTS_DIRNAME = "exports"
 SOURCES_DIRNAME = "sources"
 
-# 需要创建的子目录
+# 需要创建的子目录。
+#
+# **这里没有 cache/** —— 规划书 §16 的「缓存分层」把它列进了数据目录树，但没
+# 规定缓存存成文件还是进数据库；实现选了 SQLite（``http_cache`` 表，见
+# ``storage/sqlite.py``）。于是这个目录从建出来那天起就是空的，已删除。
 _SUBDIRS = (
-    CACHE_DIRNAME,
     COVERS_DIRNAME,
     LOGS_DIRNAME,
     EXPORTS_DIRNAME,
@@ -106,7 +107,6 @@ class Paths:
     config_file: Path
     token_file: Path
     database: Path
-    cache_dir: Path
     covers_dir: Path
     logs_dir: Path
     exports_dir: Path
@@ -131,7 +131,6 @@ def get_paths(root: Path | None = None) -> Paths:
         config_file=base / CONFIG_FILENAME,
         token_file=base / TOKEN_FILENAME,
         database=base / DATABASE_FILENAME,
-        cache_dir=base / CACHE_DIRNAME,
         covers_dir=base / COVERS_DIRNAME,
         logs_dir=base / LOGS_DIRNAME,
         exports_dir=base / EXPORTS_DIRNAME,
@@ -141,7 +140,6 @@ def get_paths(root: Path | None = None) -> Paths:
 
 __all__ = [
     "APP_NAME",
-    "CACHE_DIRNAME",
     "CONFIG_FILENAME",
     "COVERS_DIRNAME",
     "DATABASE_FILENAME",

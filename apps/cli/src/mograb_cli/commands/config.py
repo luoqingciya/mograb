@@ -33,7 +33,6 @@ def show_path(
         "data": str(paths.root),
         "config": str(paths.config_file),
         "database": str(paths.database),
-        "cache": str(paths.cache_dir),
         "covers": str(paths.covers_dir),
         "exports": str(paths.exports_dir),
         "logs": str(paths.logs_dir),

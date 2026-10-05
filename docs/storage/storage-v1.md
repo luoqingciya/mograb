@@ -40,8 +40,8 @@ PRAGMA synchronous = NORMAL;    -- WAL 下的合理折衷
 ├── mog.exe  /  _internal/          程序
 └── data/                           数据
     ├── config.toml       配置文件
-    ├── mograb.db         SQLite 数据库
-    ├── cache/            HTTP 缓存（可再生）
+    ├── token             API 访问令牌（自动生成，0600）
+    ├── mograb.db         SQLite：书 / 章节 / 任务 / HTTP 缓存
     ├── covers/           封面图片
     ├── logs/             app.log / task.log / source.log
     ├── exports/          导出产物
@@ -456,4 +456,5 @@ await chapter_repo.save_many(chapters)  # 单事务，保证原子性
 | 恢复 | 替换 `mograb.db` |
 | 导出 | 由 Export Engine 负责（业务层导出，非数据库 dump） |
 
-缓存（`cache/`）与封面（`covers/`）为可再生数据，不纳入备份范围。
+HTTP 缓存（`mograb.db` 里的 `http_cache` 表）与封面（`covers/`）为可再生数据，
+不纳入备份范围 —— 备份只需 `mograb.db` 一个文件，本来就含缓存表。

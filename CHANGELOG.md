@@ -27,6 +27,37 @@
 **刻意不做成 API 端点。** API server 启动时自己就会初始化（它得先有数据目录
 才起得来），再暴露一个「帮我建数据目录」的端点没有意义。
 
+### 移除
+
+**删掉 `data/cache/` 这个空目录。**
+
+它是规划书 §16「缓存分层」留下的：那份规划把 `cache/` 列进了数据目录树，
+但**没规定缓存存成文件还是进数据库**。实现选了 SQLite —— 数据库本来就在，
+TTL 与 LRU 用 SQL 表达更直接，备份也只要拷 `mograb.db` 一个文件。
+
+于是四层缓存都落在别处，`data/cache/` 从建出来那天起就是空的：
+
+| 规划书的层 | 实际落点 |
+| --- | --- |
+| HTTP Cache | SQLite 的 `http_cache` 表 |
+| Image Cache | `data/covers/`（没有独立的 ImageCache 实现） |
+| Book Cache | SQLite 的 `books` 表 |
+| Chapter Cache | SQLite 的 `chapters` 表 |
+
+实测：跑过搜索、下载、导出之后 `data/cache/` 仍是 **0 字节**，而
+`mograb.db` 里的 `http_cache` 有 9 行。代码里 `cache_dir` 只出现在它的定义和
+两处「打印路径」的地方，**没有任何读写**。
+
+现在删掉 `Paths.cache_dir` 与 `CACHE_DIRNAME`，`mog config path` 和
+`mog init` 的输出各少一行。
+
+**已装好的用户不受影响** —— 那个目录是空的，删掉不丢数据；旧的空目录留着也
+不影响运行，想清理可以自己删。
+
+顺带修掉三处与实现不符的文档：`storage-v1.md` 的数据目录树与备份一节写着
+`cache/` 装 HTTP 缓存；`cache.py` 的模块说明提到「图片单独走 Image Cache」
+—— 那个实现不存在，封面走的是 `data/covers/`。
+
 ### 修复
 
 **搜索换了关键词却拿到上一次的结果 —— 缓存键漏了查询参数。**

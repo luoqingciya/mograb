@@ -309,8 +309,7 @@ mog book --json | jq '.[0].id'
 └── data/
     ├── config.toml
     ├── token            ← API 访问令牌，首次启动自动生成
-    ├── mograb.db
-    ├── cache/
+    ├── mograb.db        ← 书 / 章节 / 任务 / HTTP 缓存
     ├── covers/
     ├── logs/
     ├── exports/

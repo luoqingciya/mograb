@@ -42,7 +42,6 @@ async def init(
     ensure_token(paths)
 
     directories = {
-        "cache": paths.cache_dir,
         "covers": paths.covers_dir,
         "exports": paths.exports_dir,
         "logs": paths.logs_dir,

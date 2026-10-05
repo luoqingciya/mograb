@@ -87,7 +87,6 @@ class TestPaths:
         for path in (
             paths.config_file,
             paths.database,
-            paths.cache_dir,
             paths.covers_dir,
             paths.logs_dir,
             paths.exports_dir,
@@ -99,7 +98,6 @@ class TestPaths:
         paths = get_paths(tmp_path / "fresh")
         paths.ensure()
         for directory in (
-            paths.cache_dir,
             paths.covers_dir,
             paths.logs_dir,
             paths.exports_dir,
@@ -121,7 +119,7 @@ class TestPaths:
         """数据项直接位于数据根下，不再嵌套一层。"""
         paths = get_paths(tmp_path)
         assert paths.database.parent == paths.root
-        assert paths.cache_dir.parent == paths.root
+        assert paths.exports_dir.parent == paths.root
         assert paths.logs_dir.parent == paths.root
 
 

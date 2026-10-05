@@ -23,7 +23,8 @@
    ``mog cache clear`` / ``mog cache clear-source``）。
 3. **容量淘汰**：超过 ``max_size`` 时按 LRU 淘汰（``evict``）。
 
-缓存只存 HTML/JSON/文本响应，不缓存二进制（图片单独走 Image Cache）。
+缓存只存 HTML/JSON/文本响应，不缓存二进制 —— 封面走 ``data/covers/``
+（``CoverStore``），不经过这里。
 """
 
 from __future__ import annotations

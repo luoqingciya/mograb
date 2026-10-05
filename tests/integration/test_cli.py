@@ -65,7 +65,6 @@ class TestInitCommand:
 
         assert result.exit_code == 0
         for directory in (
-            paths.cache_dir,
             paths.covers_dir,
             paths.exports_dir,
             paths.logs_dir,
@@ -99,7 +98,7 @@ class TestInitCommand:
         paths = get_paths()
 
         assert payload["data_dir"] == str(paths.root)
-        assert set(payload["directories"]) == {"cache", "covers", "exports", "logs", "sources"}
+        assert set(payload["directories"]) == {"covers", "exports", "logs", "sources"}
 
 
 class TestSourceCommands:
