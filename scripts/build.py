@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,9 @@ force_utf8_stdio()
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = REPO_ROOT / "release-artifacts"
 BUILD_DIR = REPO_ROOT / "build"
+
+ICON = REPO_ROOT / "assets" / "icon.ico"
+"""Windows exe 图标。由 ``scripts/make_icon.py`` 生成，改了配色/几何要重新跑一遍。"""
 
 # 各目标产物配置
 #
@@ -183,6 +187,17 @@ def build(target: str, version: str) -> Path:
     # importlib.metadata 读的，不复制元数据的话会退化成 0.0.0+unknown。
     for dist in cfg["metadata"]:
         args += ["--copy-metadata", dist]
+    # 图标只在 Windows 上有意义 —— .ico 是 Windows 的资源格式。
+    #
+    # 不传 --icon 时 PyInstaller **不会报错**，它会塞一个自己的默认图标，
+    # 产物照样能跑，只是任务栏上不是我们的图标。所以漏接是完全静默的，
+    # 后面 smoke 里专门核对了尺寸集合。
+    if os.name == "nt":
+        if not ICON.is_file():
+            raise SystemExit(
+                f"找不到图标 {ICON}。先生成一次：\n  uv run python scripts/make_icon.py"
+            )
+        args += ["--icon", str(ICON)]
     args.append(str(entry))
 
     subprocess.run(args, check=True, cwd=REPO_ROOT)
@@ -250,6 +265,122 @@ def flatten_dist(out_dir: Path, name: str) -> None:
             shutil.rmtree(staging)
 
 
+# ---------------------------------------------------------------------------
+# 产物图标核对
+# ---------------------------------------------------------------------------
+# PyInstaller **不带 --icon 时也会塞一个默认图标**，所以「资源段里有没有图标」
+# 完全没有区分力。漏接 --icon 的产物照样能跑，只是任务栏上是 PyInstaller 的
+# 默认图标 —— 又一次「构建成功但产物不对」。唯一能判断的办法是比对内容：
+# 把 PE 资源里 RT_GROUP_ICON 声明的尺寸集合，和 assets/icon.ico 的比。
+
+
+def _ico_sizes(path: Path) -> list[int]:
+    """读 .ico 里各张图的边长。
+
+    宽高字段只有 1 字节，所以 256 记作 0 —— 这是 ICO 格式的历史包袱。
+    """
+    data = path.read_bytes()
+    count = struct.unpack_from("<H", data, 4)[0]
+    return sorted(data[6 + i * 16] or 256 for i in range(count))
+
+
+def _pe_icon_sizes(path: Path) -> list[int]:
+    """读 PE 资源里 RT_GROUP_ICON（类型 14）声明的图标边长。
+
+    走一遍 PE 的资源目录树：类型 → 资源 ID → 语言 → 数据项。数据项给的是
+    RVA，还要借节表换算成文件偏移。
+    """
+    data = path.read_bytes()
+    if data[:2] != b"MZ":
+        return []
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe : pe + 4] != b"PE\0\0":
+        return []
+
+    coff = pe + 4
+    n_sections = struct.unpack_from("<H", data, coff + 2)[0]
+    opt_size = struct.unpack_from("<H", data, coff + 16)[0]
+    opt = coff + 20
+    magic = struct.unpack_from("<H", data, opt)[0]
+    if magic not in (0x10B, 0x20B):  # PE32 / PE32+
+        return []
+    # 数据目录从可选头的固定偏移开始，PE32 和 PE32+ 差 16 字节。
+    # 第 2 项（偏移 16）是资源表。
+    dirs = opt + (112 if magic == 0x20B else 96)
+    res_rva, res_size = struct.unpack_from("<II", data, dirs + 16)
+    if not res_rva or not res_size:
+        return []
+
+    sections: list[tuple[int, int, int]] = []
+    for i in range(n_sections):
+        s = opt + opt_size + i * 40
+        vaddr = struct.unpack_from("<I", data, s + 12)[0]
+        raw_size, raw_ptr = struct.unpack_from("<II", data, s + 16)
+        sections.append((vaddr, raw_size, raw_ptr))
+
+    def to_offset(rva: int) -> int | None:
+        for vaddr, raw_size, raw_ptr in sections:
+            if vaddr <= rva < vaddr + raw_size:
+                return raw_ptr + (rva - vaddr)
+        return None
+
+    res = to_offset(res_rva)
+    if res is None:
+        return []
+
+    def children(rel: int) -> list[tuple[int, int]]:
+        """资源目录某一层的 (ID, 子项偏移)。偏移都是相对资源目录起点的。"""
+        n_named, n_id = struct.unpack_from("<HH", data, res + rel + 12)
+        return [
+            (
+                struct.unpack_from("<I", data, res + rel + 16 + i * 8)[0] & 0x7FFFFFFF,
+                struct.unpack_from("<I", data, res + rel + 20 + i * 8)[0] & 0x7FFFFFFF,
+            )
+            for i in range(n_named + n_id)
+        ]
+
+    sizes: list[int] = []
+    for type_id, type_sub in children(0):
+        if type_id != 14:
+            continue
+        for _icon_id, name_sub in children(type_sub):
+            for _lang, leaf in children(name_sub):
+                rva, size = struct.unpack_from("<II", data, res + leaf)
+                start = to_offset(rva)
+                if start is None:
+                    continue
+                group = data[start : start + size]
+                if len(group) < 6:
+                    continue
+                count = struct.unpack_from("<H", group, 4)[0]
+                # 每个 GRPICONDIRENTRY 14 字节，第 1 个字节是宽度（0 表示 256）
+                sizes.extend(group[6 + i * 14] or 256 for i in range(count))
+    return sorted(sizes)
+
+
+def _assert_exe_icon(out_dir: Path, target: str) -> None:
+    """确认产物真的带上了我们的图标。
+
+    只在 Windows 上跑 —— 别的平台的 PyInstaller 不处理 .ico。
+    """
+    if os.name != "nt":
+        return
+
+    exe = out_dir / f"{TARGETS[target]['name']}.exe"
+    if not exe.is_file():
+        sys.exit(f"[icon] 找不到 {exe}")
+
+    expected = _ico_sizes(ICON)
+    actual = _pe_icon_sizes(exe)
+    if actual != expected:
+        sys.exit(
+            f"[icon] {exe.name} 里的图标尺寸是 {actual}，期望 {expected}。\n"
+            "[icon] 尺寸对不上说明 --icon 没生效（PyInstaller 会退回自己的默认"
+            "图标），或者 assets/icon.ico 是旧的 —— 重新跑 scripts/make_icon.py。"
+        )
+    print(f"[icon] {exe.name} 图标尺寸核对通过：{actual}")
+
+
 def smoke_test(out_dir: Path, target: str, version: str) -> None:
     """跑一遍产物，确认它真的能用。
 
@@ -275,6 +406,10 @@ def smoke_test(out_dir: Path, target: str, version: str) -> None:
         _smoke_cli(out_dir, version)
     else:
         _smoke_backend(out_dir, version)
+
+    # 图标和「能不能跑」无关，但同样属于「构建成功 ≠ 产物正确」那一类，
+    # 而且漏了完全静默，所以放在这里一起把关。
+    _assert_exe_icon(out_dir, target)
 
 
 def _smoke_cli(out_dir: Path, version: str) -> None:

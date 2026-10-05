@@ -19,6 +19,11 @@ def build_module(load_script):
     return load_script("build.py")
 
 
+@pytest.fixture(scope="module")
+def make_icon_module(load_script):
+    return load_script("make_icon.py")
+
+
 def _make_nested(out_dir: Path, name: str, exe_name: str) -> Path:
     """造一个 PyInstaller 风格的产物：<out_dir>/<name>/{exe,_internal/}"""
     nested = out_dir / name
@@ -221,3 +226,31 @@ class TestPackagingCoverage:
             n for n in build_module.COLLECT_SUBMODULES if importlib.util.find_spec(n) is None
         ]
         assert not missing, f"这些包没装或名字写错: {missing}"
+
+
+class TestIconWiring:
+    """图标要真的接进产物。
+
+    **不能用「资源段里有没有图标」当判据。** PyInstaller 不带 ``--icon`` 时
+    也会塞一个自己的默认图标 —— 那个判据永远为真，漏接 ``--icon`` 完全静默。
+    唯一能判断的办法是比对尺寸集合（实测：默认图标是 16/32/48/256，
+    我们的是 16/24/32/48/64/128/256）。
+    """
+
+    def test_图标文件存在(self, build_module) -> None:
+        """路径写错的话，构建时报的错很难指向真正的原因。"""
+        assert build_module.ICON.is_file(), f"图标不存在: {build_module.ICON}"
+
+    def test_ico_尺寸与生成脚本一致(self, build_module, make_icon_module) -> None:
+        """两个脚本对「图标里该有哪些尺寸」的看法必须一致。
+
+        对不上的话，冒烟测试会用一组过时的期望去比产物的图标。
+        """
+        assert build_module._ico_sizes(build_module.ICON) == sorted(make_icon_module.ICO_SIZES)
+
+    def test_对非_PE_文件返回空(self, build_module, tmp_path: Path) -> None:
+        """构建失败留下的半截文件不该让检查炸掉。"""
+        junk = tmp_path / "not-pe.exe"
+        junk.write_bytes(b"this is definitely not a PE file" * 20)
+
+        assert build_module._pe_icon_sizes(junk) == []
