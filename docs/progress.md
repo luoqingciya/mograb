@@ -1,34 +1,26 @@
 # 项目进度
 
-> 更新于 2026-10-05 · 当前版本 `1.0.0rc8`（预发布）
+> 更新于 2026-11-27 · 当前版本 `1.0.0-rc.8`（预发布，Rust 迁移完成）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
 
 ## 一句话
 
-核心链路已经跑通，而且**在真实站点上验证过**：`bqgnovels.com` 的书源取到完整
-目录 1453 章，端到端下载 2036 章 / 451 万字，三种格式导出正常。
-命令行、本地 API、桌面端三条路都通了；API 的所有业务端点都要求 Bearer 令牌；
-本地全文搜索（`mog find` / `GET /api/v1/search/local`）两条路都有；
-桌面端目前只做到最小闭环，书架、书源管理、设置还是占位页。
-
-> **rc1 的发布包是坏的，rc2 修掉了。** 两个产物都打不开数据库
-> （`ModuleNotFoundError: aiosqlite`），而三道关都没拦住 —— 因为都只验
-> 「构建成功」，没人真执行过产物。现在构建会自跑冒烟测试。
+核心链路已由 Python 完整迁移至纯 Rust Cargo 工作区（`mograb-core` / `mograb-api` / `mograb-cli`），
+保持所有已冻结 v1 规范（Source Spec v1、Domain Model v1、Storage v1、API v1）完全兼容。
+命令行、本地 API（24 条路径 + SSE + Bearer 鉴权）、本地全文搜索（`mog find` / `GET /api/v1/search/local`）
+与 Electron 桌面端后端启动链路全部打通；桌面端目前仍为最小闭环，书架、书源管理、设置待补完。
 
 ## 质量指标
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 测试用例 | 797（796 通过 + 1 跳过） | `uv run pytest --collect-only -q \| tail -1` |
-| 覆盖率 | 86.2% | `uv run pytest --cov --cov-report=term` |
-| 覆盖率门槛 | 70%（`fail_under`） | 见根 `pyproject.toml` |
-| 源码行数 | 约 13,900（另有桌面端 TS 约 1,400 行） | `find packages apps/cli apps/api -name "*.py" -not -path "*/node_modules/*" \| xargs wc -l \| tail -1` |
-| 测试行数 | 约 8,700 | `find tests packages -name "test_*.py" \| xargs wc -l \| tail -1` |
-| 未实现桩 | 0 | `grep -rn NotImplementedError packages apps --include="*.py" \| grep -v node_modules` |
+| 核心库测试 | `mograb-core` 35 项测试通过（含 `example-source` 4 能力夹具与端到端模拟下载/EPUB 导出） | `cargo test -p mograb-core` |
+| API 测试 | `mograb-api` 3 项测试通过（鉴权、24 路径 OpenAPI、SSE、任务状态机与错误码） | `cargo test -p mograb-api` |
+| CLI 测试 | `mograb-cli` 4 项端到端集成测试通过（直接运行 `mog` 二进制） | `cargo test -p mograb-cli` |
+| 静态检查 | `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` | 本地或 CI `lint` job |
 | 桌面端测试 | 14 | `cd apps/desktop && npm test` |
-| CI | 全绿（8 个 job） | `gh run list` |
 
 ## 里程碑
 
@@ -185,26 +177,29 @@ cover / publisher / created_at`，并注明「允许用户通过模板配置」�
 
 ## 各模块完成度
 
-`packages/mograb/` 下九个模块：
+`crates/mograb-core/src/` 下十二个模块：
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| `domain` | 完成 | 领域模型 + 枚举 + ULID |
-| `source` | 完成 | 加载、校验、提取、变换、执行 |
-| `network` | 完成 | 客户端、缓存、限流、重试 |
-| `task` | 完成 | 队列、Worker、调度、生命周期 |
-| `storage` | 完成 | 8 张表、7 个仓储 |
-| `content` | 完成 | 清洗、规范化、校验 |
-| `export` | 完成 | TXT / Markdown / EPUB |
-| `config` | 完成 | 路径、设置 |
-| `logging` | 完成 | 结构化日志 + 脱敏 |
+| `domain` | 完成 | 领域模型 + 枚举 + ULID + BLAKE2b 哈希 |
+| `source` | 完成 | 加载、lint、CSS/XPath/JSONPath/Regex 提取、变换、执行、夹具运行器 |
+| `network` | 完成 | reqwest 客户端、缓存、令牌桶/信号量限流、重试、GBK 转码 |
+| `task` | 完成 | 优先级队列、Worker、并发下载调度、断点 diff、生命周期 |
+| `storage` | 完成 | sqlx 8 张表迁移、7 个仓储 + HTTP 缓存 |
+| `content` | 完成 | 清洗、规范化、字数校验 |
+| `export` | 完成 | TXT / Markdown / EPUB3（zip） |
+| `covers` | 完成 | 封面下载、域名白名单与路径校验 |
+| `config` | 完成 | 便携路径、TOML 设置 + 环境变量覆盖、令牌生成 |
+| `logging` | 完成 | tracing 结构化日志 + 请求头脱敏 |
+| `errors` | 完成 | 23 种错误变体与重试/API 错误体映射 |
+| `app` | 完成 | `Application` 装配根 |
 
-应用层：
+应用与工作区入口：
 
-| 应用 | 状态 | 说明 |
-|------|------|------|
-| `apps/cli` | 完成 | 13 组命令 |
-| `apps/api` | 完成 | 24 条路径 / 28 个端点（含 2 条 SSE），全部要求 Bearer 令牌 |
+| Crate / 应用 | 状态 | 说明 |
+|--------------|------|------|
+| `crates/mograb-cli` | 完成 | `mog` 二进制，14 组命令（clap） |
+| `crates/mograb-api` | 完成 | `mograb-api` 二进制，24 条路径 / 28 个端点（Axum + utoipa + SSE），全业务端点强制 Bearer 鉴权 |
 | `apps/desktop` | 最小闭环 | 搜索 → 下载 → 任务进度可用；书架 / 书源 / 设置是占位 |
 
 ## 已知缺口

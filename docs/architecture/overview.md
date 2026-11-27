@@ -12,7 +12,7 @@
                               │ REST + SSE
 ┌─────────────────────────────┼──────────────────────────┐
 │                             ▼                          │
-│              MoGrab API Server (FastAPI)               │
+│              MoGrab API Server (Axum)                  │
 │                       /api/v1                          │
 ├────────────────────────────────────────────────────────┤
 │  Source │ Search │ Book │ Task │ Download │ Export     │
@@ -39,41 +39,42 @@ CLI 直接调 Core，桌面端走 HTTP 调 Core。两条路径共用同一套业
 
 ```
 MoGrab/
-├── pyproject.toml              uv workspace 根，本身不可安装
-├── uv.lock
+├── Cargo.toml                  Rust 工作区根
+├── Cargo.lock
 ├── VERSION                     版本号唯一来源
 ├── README.md  LICENSE  CHANGELOG.md
 ├── CONTRIBUTING.md  SECURITY.md  CODE_OF_CONDUCT.md
 ├── THIRD_PARTY_LICENSES.md
 │
-├── packages/
-│   └── mograb/                 核心库，唯一
-│       ├── pyproject.toml
-│       └── src/mograb/
-│           ├── app.py          composition root，CLI 与 API 共用的装配入口
-│           ├── domain/         领域模型，最稳定的部分
-│           ├── source/         书源加载、校验、执行
-│           ├── network/        HTTP、缓存、限流、重试
-│           ├── task/           队列、Worker、调度、生命周期
-│           ├── storage/        ORM、仓储、SQLite
-│           ├── content/        清洗、规范化、校验
-│           ├── export/         TXT、Markdown、EPUB
-│           ├── config/         配置与路径
-│           ├── logging/        结构化日志与脱敏
-│           ├── _version.py     从包元数据读版本
-│           └── errors.py       统一错误层次
+├── crates/
+│   ├── mograb-core/            核心库，唯一
+│   │   ├── Cargo.toml
+│   │   ├── migrations/         SQLx SQLite 迁移脚本
+│   │   └── src/
+│   │       ├── lib.rs          版本常量与模块导出
+│   │       ├── app.rs          composition root，CLI 与 API 共用的装配入口
+│   │       ├── covers.rs       封面下载与安全校验
+│   │       ├── domain/         领域模型，最稳定的部分
+│   │       ├── source/         书源加载、校验、执行
+│   │       ├── network/        HTTP、缓存、限流、重试
+│   │       ├── task/           队列、Worker、调度、生命周期
+│   │       ├── storage/        SQLx 仓储、SQLite
+│   │       ├── content/        清洗、规范化、校验
+│   │       ├── export/         TXT、Markdown、EPUB
+│   │       ├── config/         配置与路径
+│   │       ├── logging/        结构化日志与脱敏
+│   │       └── errors.rs       统一错误枚举与 API 映射
+│   ├── mograb-api/             本地 REST API / SSE 服务（Axum）
+│   └── mograb-cli/             命令行，clap（二进制 mog）
 │
 ├── apps/
-│   ├── cli/                    mograb-cli，命令名 mog
-│   ├── api/                    mograb-api，FastAPI
 │   └── desktop/                Electron，仅 Windows
 │
-├── sources/                   本地书源工作区，不进仓库（见下）
+├── sources/                    本地书源工作区，不进仓库（见下）
 │
 ├── tests/
-│   ├── unit/  integration/  source/
 │   └── fixtures/
-│       └── example-source/    参考书源 + HTML 快照，兼测试数据
+│       └── example-source/     参考书源 + HTML 快照，兼测试数据
 │
 ├── docs/
 │   ├── architecture/           本目录
@@ -181,7 +182,7 @@ API 只监听 `127.0.0.1`，直觉上「只有本机能访问 = 安全」。**�
 CLI / API
   ↓ SourceEngine.search(source, keyword)
 TemplateContext(keyword) → build_request → RenderedRequest
-  ↓ Fetcher.fetch  [Network: 缓存 → 限流 → 重试 → httpx]
+  ↓ Fetcher.fetch  [Network: 缓存 → 限流 → 重试 → reqwest]
 Document
   ↓ extract_many(list_rule, field_rules)   [Parser]
 rows
@@ -235,7 +236,7 @@ GlobalLimiter(concurrency=8)
 
 实际并发取 `min(全局, 本源的)`。
 
-底层是 asyncio + httpx.AsyncClient + 有界 worker 池。
+底层是 Tokio + reqwest + Semaphore 有界工作池。
 
 | 层级 | 作用 | 配置项 |
 |------|------|-------|
@@ -267,27 +268,25 @@ RetryPolicy.should_retry(error, attempt)?
 
 | 层 | 选型 | 说明 |
 |----|------|------|
-| 语言 | Python ≥ 3.11 | 用到了 `StrEnum`、`datetime.UTC` |
-| 依赖管理 | uv workspace | 只在开发和构建期用，不进发布产物 |
-| API | FastAPI + uvicorn + sse-starlette | |
-| 校验 | Pydantic v2 + pydantic-settings | |
-| 解析 | lxml + cssselect + jsonpath-ng | 一个引擎覆盖 CSS 和 XPath |
-| HTTP | httpx | 异步 |
-| 存储 | SQLAlchemy 2.0 async + aiosqlite + Alembic | |
-| 日志 | structlog | 结构化，带脱敏 |
-| CLI | Typer + Rich | |
+| 语言 | Rust (edition 2024) | 零运行时依赖，单二进制分发 |
+| 依赖管理 | Cargo workspace | `mograb-core` / `mograb-api` / `mograb-cli` |
+| API | Axum + Tokio + utoipa | 含 SSE 事件流与 OpenAPI 3 文档 |
+| 校验 | Serde + semver | 严格 `deny_unknown_fields` |
+| 解析 | scraper + sxd-xpath + serde_json_path + fancy-regex | 纯 Rust 覆盖 HTML5/CSS、XPath 1.0、JSONPath、正则 |
+| HTTP | reqwest (rustls) + encoding_rs | 异步 + GBK/GB18030 转码 |
+| 存储 | sqlx (SQLite WAL) | 启动自动迁移 |
+| 日志 | tracing + tracing-subscriber | 结构化日志 + 请求头脱敏 |
+| CLI | clap + comfy-table + indicatif | |
 | 桌面端 | Electron + TypeScript（tsc，不引打包器） | 见 apps/desktop/README.md |
-| 测试 | pytest + pytest-asyncio + pytest-cov | |
-| 质量 | Ruff + Pyright + pre-commit | |
+| 测试 | `cargo test --workspace` + CLI 集成测试 | |
+| 质量 | rustfmt + clippy (`-D warnings`) + pre-commit | |
 
 ### 刻意不用的
 
-| 库 | 原因 |
-|----|------|
-| `ebooklib` | AGPL-3.0，会给 GPL-3.0-only 带来额外分发义务。改成自研 EPUB 写入器 |
-| `tenacity` | 需要按错误类型分类重试、按书源隔离策略，自研反而更直接 |
-| `selectolax` | 不支持 XPath，而规范要求支持。留作可选加速依赖 |
-| `platformdirs` | 改成便携模式后不再需要 |
+| 方案 | 原因 |
+|------|------|
+| C/FFI 绑定（如 libxml2 / OpenSSL） | 采用 `scraper`/`sxd-xpath`/`rustls` 纯 Rust 栈，避免跨平台静态链接和系统库差异 |
+| AGPL 依赖 | 维持 `GPL-3.0-only` 纯净度，使用 `zip` 自研 EPUB3 写入器 |
 
 ## 开发顺序
 

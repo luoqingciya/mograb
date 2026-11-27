@@ -19,9 +19,10 @@ import re
 import sys
 from pathlib import Path
 
-from _console import force_utf8_stdio
-
-force_utf8_stdio()
+for _stream in (sys.stdout, sys.stderr):
+    reconf = getattr(_stream, "reconfigure", None)
+    if reconf is not None:
+        reconf(encoding="utf-8")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"

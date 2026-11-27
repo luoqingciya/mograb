@@ -1,20 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# MoGrab Release —— 对应规划书 §57.6、§57.7。
+# MoGrab Release —— 原生 Rust 二进制 + Electron Windows 打包流水线。
 #
 # 触发方式：
 #   1. 推 v* tag（正式发版）
 #   2. 手动触发（可以只建 draft 做预演）
 #
-# 流程：Verify → 三路并行打包 → SHA256SUMS → GitHub Release
-#
-# 预发布版本（1.0.0a1 / 1.0.0rc0 / 1.0.0.dev0）会自动标成 prerelease ——
-# 不标的话它会被当成正式版挂在 releases 页首，还会被当成 latest。
-# 判定交给 scripts/version.py flags（用 packaging，不手写正则）。
-#
-# 打包说明（§57.1、§57.2）：
-#   - CLI 用 PyInstaller onedir，不追求单文件 EXE
-#   - 最终产物不含 uv / Python / Node.js
+# 流程：Verify → 三路并行构建（Win CLI / Win Desktop / Linux CLI）→ SHA256SUMS → GitHub Release
 
 name: Release
 
@@ -24,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号（不含 v 前缀），必须与 VERSION 文件一致，例如 1.0.0rc0"
+        description: "版本号（不含 v 前缀），必须与 VERSION 和 Cargo.toml 一致，例如 1.0.0-rc.8"
         required: true
         type: string
       draft:
@@ -37,8 +29,7 @@ permissions:
   contents: write
 
 env:
-  PYTHONUNBUFFERED: "1"
-  # tag 触发时取 tag 名，手动触发时取输入；后面的步骤会去掉 v 前缀
+  CARGO_TERM_COLOR: always
   RAW_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
@@ -49,60 +40,60 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     outputs:
-      # 后面的 job 靠这两个值拼产物名、决定要不要标预发布
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          enable-cache: true
+          components: rustfmt, clippy
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
-
-      # tag 名必须和 VERSION 文件一致，否则产物名和包内版本会对不上。
-      # 顺便把 version / prerelease 两个属性导出给后面的 job。
       - name: Resolve and check version
         id: version
         shell: bash
         run: |
           set -euo pipefail
           tag_version="${RAW_VERSION#v}"
-          file_version="$(uv run python scripts/version.py show)"
-          echo "本次发布版本 = $tag_version"
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          cargo_version="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+
+          echo "本次发布版本   = $tag_version"
           echo "VERSION 文件   = $file_version"
-          if [ "$tag_version" != "$file_version" ]; then
-            echo "::error::版本不一致。先把 VERSION 改成 $tag_version 并提交，再重新打 tag"
+          echo "Cargo.toml 版本 = $cargo_version"
+
+          if [ "$tag_version" != "$file_version" ] || [ "$tag_version" != "$cargo_version" ]; then
+            echo "::error::版本不一致，请确保 Tag、VERSION 与 Cargo.toml 一致"
             exit 1
           fi
 
-          flags="$(uv run python scripts/version.py flags)"
-          echo "$flags"
-          echo "$flags" >> "$GITHUB_OUTPUT"
+          if [[ "$tag_version" == *-* ]]; then
+            prerelease="true"
+          else
+            prerelease="false"
+          fi
 
-      - name: Check version source
-        run: uv run python scripts/version.py check
-
-      - name: Lint
-        run: uv run ruff check .
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Format check
-        run: uv run ruff format --check .
+        run: cargo fmt --all -- --check
 
-      - name: Type check
-        run: uv run pyright
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
-        run: uv run pytest -m "not network"
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
+      - name: Check documentation links
+        run: python3 scripts/check_docs.py
 
   # ---------------------------------------------------------------------------
-  # Windows CLI（PyInstaller onedir → ZIP）
+  # Windows CLI（单二进制 mog.exe + 许可证 → ZIP）
   # ---------------------------------------------------------------------------
   build-cli-windows:
     name: Build CLI (Windows x64)
@@ -111,28 +102,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages --group build
+      - name: Build mog.exe
+        run: cargo build --release --locked --bin mog
 
-      - name: Build CLI
+      - name: Smoke test mog.exe
         shell: bash
-        run: uv run python scripts/build.py cli --version "${RAW_VERSION#v}"
+        run: target/release/mog.exe --version
 
-      - name: Create ZIP
+      - name: Stage & Create ZIP
         shell: pwsh
         run: |
-          $version = $env:RAW_VERSION -replace '^v', ''
-          # 压缩 MoGrab-CLI 目录本身，这样解压出来顶层就是 MoGrab-CLI/
-          Compress-Archive -Path "release-artifacts/MoGrab-CLI" `
-                           -DestinationPath "MoGrab-CLI-v$version-win-x64.zip"
+          $version = "${{ needs.verify.outputs.version }}"
+          $stage = "release-artifacts/MoGrab-CLI"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/release/mog.exe" "$stage/"
+          Copy-Item "LICENSE" "$stage/"
+          Copy-Item "THIRD_PARTY_LICENSES.md" "$stage/"
+          Compress-Archive -Path $stage -DestinationPath "MoGrab-CLI-v$version-win-x64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -142,7 +134,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Windows Desktop（后端 sidecar + Electron → ZIP + NSIS）
+  # Windows Desktop（原生后端 mograb-api.exe + Electron → ZIP + NSIS）
   # ---------------------------------------------------------------------------
   build-desktop-windows:
     name: Build Desktop (Windows x64)
@@ -151,13 +143,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -166,24 +156,24 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
-      - name: Install Python dependencies
-        run: uv sync --locked --all-packages --group build
+      - name: Build backend sidecar (mograb-api.exe)
+        run: cargo build --release --locked --bin mograb-api
 
-      - name: Build backend sidecar
-        shell: bash
-        run: uv run python scripts/build.py backend --version "${RAW_VERSION#v}"
+      - name: Stage backend sidecar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "release-artifacts/backend" | Out-Null
+          Copy-Item "target/release/mograb-api.exe" "release-artifacts/backend/"
 
       - name: Install Electron dependencies
         working-directory: apps/desktop
         run: npm ci
 
-      # 版本号从 tag 传进来，不去改 package.json —— 改了会让 lock 对不上，
-      # npm ci 就有风险。界面要显示版本就读后端 /health。
       - name: Build Electron app (ZIP + NSIS)
         working-directory: apps/desktop
         shell: bash
         run: |
-          version="${RAW_VERSION#v}"
+          version="${{ needs.verify.outputs.version }}"
           npm run build
           npx electron-builder --win --publish never --config.extraMetadata.version="$version"
 
@@ -197,7 +187,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Linux CLI（tar.gz）
+  # Linux CLI（单二进制 mog + 许可证 → tar.gz）
   # ---------------------------------------------------------------------------
   build-cli-linux:
     name: Build CLI (Linux x64)
@@ -206,23 +196,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages --group build
+      - name: Build mog
+        run: cargo build --release --locked --bin mog
 
-      - name: Build CLI
-        run: uv run python scripts/build.py cli --version "${RAW_VERSION#v}"
+      - name: Smoke test mog
+        run: ./target/release/mog --version
 
-      - name: Create tar.gz
+      - name: Stage & Create tar.gz
         run: |
-          version="${RAW_VERSION#v}"
+          version="${{ needs.verify.outputs.version }}"
+          stage="release-artifacts/MoGrab-CLI"
+          mkdir -p "$stage"
+          cp target/release/mog "$stage/"
+          cp LICENSE THIRD_PARTY_LICENSES.md "$stage/"
           tar -czf "MoGrab-CLI-v${version}-linux-x64.tar.gz" -C release-artifacts MoGrab-CLI
 
       - name: Upload artifact
@@ -237,7 +229,6 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Create GitHub Release
-    # verify 要显式列出来 —— 间接依赖拿不到它的 outputs
     needs: [verify, build-cli-windows, build-desktop-windows, build-cli-linux]
     runs-on: ubuntu-latest
     steps:
@@ -260,9 +251,6 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
-          # 用脚本而不是内联 awk：反斜杠要穿过 YAML → bash → awk 三层转义，
-          # 写错一次就会把整份 CHANGELOG（连版本规划表）都当成发布说明。
-          # scripts/release.py 里是 re.escape 过的正则，还有测试盯着。
           python3 scripts/release.py notes --version "$VERSION" > release-notes.md
           echo "----- 发布说明（$(wc -l < release-notes.md) 行）-----"
           head -30 release-notes.md
@@ -278,9 +266,6 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.exe
             artifacts/SHA256SUMS.txt
-          # 预发布（a/b/rc/dev）必须标出来，否则会被当成正式版，
-          # 还会被 GitHub 当成 latest 挂到 releases 页首
           prerelease: ${{ needs.verify.outputs.prerelease }}
-          # tag 触发一律直接发布；手动触发可以选只建 draft 做预演
           draft: ${{ inputs.draft == true }}
           generate_release_notes: false
