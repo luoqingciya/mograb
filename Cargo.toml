@@ -1,0 +1,83 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mograb-core",
+    "crates/mograb-api",
+    "crates/mograb-cli",
+]
+
+[workspace.package]
+version = "1.0.0-rc.8"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["MoGrab Contributors"]
+
+[workspace.dependencies]
+# Core workspace crates
+mograb-core = { path = "crates/mograb-core" }
+mograb-api = { path = "crates/mograb-api" }
+
+# Async & runtime
+tokio = { version = "1.54", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & formats
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+toml = "1"
+
+# Parsing & extraction
+scraper = "0.29"
+ego-tree = "0.11"
+sxd-document = "0.3"
+sxd-xpath = "0.4"
+serde_json_path = "0.7"
+fancy-regex = "0.20"
+regex = "1"
+html-escape = "0.2"
+
+# Network & encoding
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset", "gzip", "brotli", "deflate", "cookies", "json", "http2", "stream"] }
+encoding_rs = "0.8"
+url = "2"
+
+# Storage
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "migrate", "chrono", "json"] }
+
+# Crypto / IDs / Time / Versioning / Export
+blake2 = "0.11"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "v5"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = "1"
+rand = "0.10"
+base64 = "0.23"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+thiserror = "2"
+subtle = "2.6"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+# API
+axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["cors", "trace"] }
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "10", features = ["axum"] }
+
+# CLI
+clap = { version = "4.6", features = ["derive", "env"] }
+clap_complete = "4.6"
+indicatif = "0.18"
+comfy-table = "8"
+
+# Windows build
+winres = "0.1"
+
+# Dev / testing
+tempfile = "3"

@@ -37,6 +37,7 @@ SKIP_DIRS = frozenset(
         "node_modules",
         "release-artifacts",
         "site-packages",
+        "target",
     }
 )
 

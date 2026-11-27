@@ -55,18 +55,28 @@ function backendRunDir(): string {
 /** 解析要跑的命令。 */
 function resolveCommand(): { command: string; args: string[]; cwd: string } {
   const cwd = backendRunDir();
+  const binName = process.platform === 'win32' ? 'mograb-api.exe' : 'mograb-api';
 
   if (app.isPackaged) {
-    const exe = join(cwd, 'mograb-api.exe');
+    const exe = join(cwd, binName);
     if (!existsSync(exe)) {
       throw new Error(`找不到后端程序：${exe}`);
     }
     return { command: exe, args: [], cwd };
   }
 
+  const debugBin = join(cwd, 'target', 'debug', binName);
+  if (existsSync(debugBin)) {
+    return { command: debugBin, args: [], cwd };
+  }
+  const releaseBin = join(cwd, 'target', 'release', binName);
+  if (existsSync(releaseBin)) {
+    return { command: releaseBin, args: [], cwd };
+  }
+
   return {
-    command: 'uv',
-    args: ['run', '--project', cwd, 'mograb-api'],
+    command: 'cargo',
+    args: ['run', '--quiet', '--bin', 'mograb-api'],
     cwd,
   };
 }

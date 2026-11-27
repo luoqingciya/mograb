@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# MoGrab CI —— 对应规划书 §48。
+# MoGrab CI —— Rust Cargo 工作区流水线。
 #
-# 阶段：lint → type-check → unit-test → integration-test → source-test
-# 矩阵：Python 3.11/3.12 × Windows/Linux
+# 阶段：lint (fmt + clippy + check_docs) → test (Ubuntu/Windows + fixtures) → build-smoke → desktop
 
 name: CI
 
 on:
-  # 只有 main。早期文档和这里都写过 develop，但那个分支从来不存在 ——
-  # 留着会让读的人以为有两条长期分支。
   push:
     branches: [main]
   pull_request:
@@ -21,265 +18,141 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PYTHONUNBUFFERED: "1"
-  UV_FROZEN: "1"
+  CARGO_TERM_COLOR: always
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint + 格式 + 文档内链
+  # 格式 + Clippy + 文档内链
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint
+    name: Lint & Docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          enable-cache: true
+          components: rustfmt, clippy
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
+      - name: Format check
+        run: cargo fmt --all -- --check
 
-      - name: Ruff check
-        run: uv run ruff check --output-format=github .
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
-      # 文档里引用的文件必须真实存在。之前规划书被收进 docs/planning/ 时
-      # 就留下一批悬空引用，靠人眼查不现实。
       - name: Check documentation links
-        run: uv run python scripts/check_docs.py
+        run: python3 scripts/check_docs.py
 
   # ---------------------------------------------------------------------------
-  # 版本号来源
-  # ---------------------------------------------------------------------------
-  version:
-    name: Version source
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
-
-      # 校验 VERSION 符合 PEP 440，三个包都用 dynamic version 指向同一个文件，
-      # 且源码里没有第二处硬编码的 __version__
-      - name: Check version source
-        run: uv run python scripts/version.py check
-
-      - name: Show version
-        run: uv run python scripts/version.py show
-
-  # ---------------------------------------------------------------------------
-  # 类型检查
-  # ---------------------------------------------------------------------------
-  type-check:
-    name: Type check (pyright)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
-
-      - name: Pyright
-        run: uv run pyright
-
-  # ---------------------------------------------------------------------------
-  # 测试（矩阵）
+  # 单元测试 / 集成测试 / 示例书源离线夹具
   # ---------------------------------------------------------------------------
   test:
-    name: Test (py${{ matrix.python }} / ${{ matrix.os }})
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python ${{ matrix.python }}
-        run: uv python install ${{ matrix.python }}
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
 
-      # 单元 + 集成 + 书源 fixture（全部离线；network 标记默认跳过）
-      - name: Run tests
-        run: uv run pytest -m "not network" --cov --cov-report=xml --cov-report=term
-
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage
-          path: coverage.xml
-          if-no-files-found: warn
-
-  # ---------------------------------------------------------------------------
-  # 书源校验
-  #
-  # 书源本身不进仓库，这里只校验 tests/fixtures 下的示例书源 ——
-  # 它是规范的参考实现，挂了说明规范或 linter 出了问题。
-  # ---------------------------------------------------------------------------
-  source-lint:
-    name: Source lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --locked --all-packages
-
-      - name: Lint example source
+      - name: Lint and test example sources
         shell: bash
         run: |
           set -euo pipefail
           shopt -s globstar nullglob
           found=0
-          failed=0
           for f in tests/fixtures/**/source.yaml; do
             found=1
             echo "::group::lint $f"
-            if ! uv run mog source lint "$f"; then
-              failed=1
-            fi
+            cargo run --locked --bin mog -- source lint "$f"
             echo "::endgroup::"
           done
           if [ "$found" -eq 0 ]; then
-            echo "::error::没找到任何书源夹具，tests/fixtures 是不是被清掉了？"
+            echo "::error::未找到 tests/fixtures/**/source.yaml"
             exit 1
           fi
-          exit $failed
 
-      # lint 只查规则能不能编译；这一步真跑一遍提取，
-      # 才能发现「选择器写错了、匹配不到东西」这类失效。
-      - name: Test example source against fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
           tested=0
           for f in tests/fixtures/**/fixtures/cases.yaml; do
             tested=1
             dir="$(dirname "$(dirname "$f")")"
             echo "::group::source test $dir"
-            uv run mog source test "$dir"
+            cargo run --locked --bin mog -- source test "$dir"
             echo "::endgroup::"
           done
           if [ "$tested" -eq 0 ]; then
-            echo "::error::没找到任何 fixtures/cases.yaml，示例书源的用例被删了？"
+            echo "::error::未找到 tests/fixtures/**/fixtures/cases.yaml"
             exit 1
           fi
 
   # ---------------------------------------------------------------------------
-  # 构建产物校验（确保包可安装）
+  # Release 二进制构建与端到端冒烟
   # ---------------------------------------------------------------------------
-  build:
-    name: Build packages
+  build-smoke:
+    name: Release Build & Smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Build wheels
-        run: uv build --all-packages --out-dir dist
+      - name: Build release binaries
+        run: cargo build --release --locked --bins
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
-          if-no-files-found: error
+      - name: Smoke test CLI & API binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_home="$(mktemp -d)"
+          trap 'rm -rf "$tmp_home"' EXIT
+          export MOGRAB_HOME="$tmp_home"
 
-  # ---------------------------------------------------------------------------
-  # 打包产物冒烟（PyInstaller）
-  #
-  # 为什么要有这个 job：rc1 发出去的 CLI 和桌面端**都是坏的** ——
-  # SQLAlchemy 按名字动态导入 aiosqlite，PyInstaller 静态分析看不见，
-  # 于是产物能跑 --version、能出 --help，一碰数据库就崩。
-  # 构建、CI、发布三道关全都没拦住。
-  #
-  # 只在 Linux 上打，够用：这类问题的根因是「模块没被打进去」，
-  # 与平台无关。Windows 的打包由 Release 工作流在发版前验证。
-  # ---------------------------------------------------------------------------
-  package-smoke:
-    name: Package smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
+          target/release/mog --version
+          target/release/mog init --json
+          target/release/mog book --json
+          target/release/mog find 关键词 --json
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+          MOGRAB_SERVER__HOST=127.0.0.1 MOGRAB_SERVER__PORT=48799 target/release/mograb-api &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true; rm -rf "$tmp_home"' EXIT
 
-      - name: Set up Python
-        run: uv python install 3.12
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:48799/health > /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
 
-      - name: Install dependencies
-        run: uv sync --locked --all-packages --group build
+          curl -sf http://127.0.0.1:48799/health
+          code_unauth="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:48799/api/v1/sources)"
+          test "$code_unauth" = "401"
 
-      # build.py 构建完会自动跑冒烟测试：真的执行产物，
-      # 验版本号、数据库读写、数据目录创建、以及输出编码。
-      # 后端还会起一次服务并打一个走数据库的端点。
-      #
-      # 版本号取仓库里的 VERSION —— build.py 会拿它和已安装包的元数据比对，
-      # 不一致直接拒绝（防止产物带错版本号），所以不能随便编一个。
-      - name: Build and smoke-test CLI
-        run: uv run python scripts/build.py cli --version "$(cat VERSION)"
+          token="$(cat "$tmp_home/token")"
+          code_auth="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" http://127.0.0.1:48799/api/v1/sources)"
+          test "$code_auth" = "200"
 
-      - name: Build and smoke-test backend
-        run: uv run python scripts/build.py backend --version "$(cat VERSION)"
+          kill "$api_pid" || true
 
   # ---------------------------------------------------------------------------
   # 桌面端（TypeScript 编译 + 类型检查 + SSE 解析器测试）
-  #
-  # 只装依赖不下载 Electron 二进制 —— 类型检查、tsc 编译和那 14 个测试
-  # 都用不到它，省一次上百兆的下载。
   # ---------------------------------------------------------------------------
   desktop:
     name: Desktop (tsc)
@@ -308,7 +181,6 @@ jobs:
         working-directory: apps/desktop
         run: npm run build
 
-      # 测的是编译产物（dist/renderer/sse.js），所以必须排在 Build 之后
       - name: Test
         working-directory: apps/desktop
         run: npm test

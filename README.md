@@ -2,10 +2,10 @@
 
 # MoGrab
 
-开源的小说抓取与电子书整理工具。Python 写的，后端 + 命令行 + Windows 桌面端。
+开源的小说抓取与电子书整理工具。Rust 写的，核心引擎 + 本地 API + 命令行 + Windows 桌面端（Electron）。
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg)](https://www.rust-lang.org/)
 
 ## 这个项目想解决什么
 
@@ -41,7 +41,7 @@ content:
 
 ## 现在做到哪了
 
-版本 `1.0.0rc8`（**预发布**）。规范已经定下来，**整条链路都通了** ——
+版本 `1.0.0-rc.8`（**预发布**，已完成 Rust 重构迁移）。规范已经定下来，**整条链路都通了** ——
 装书源、搜书、下载、增量更新、导出、在已下载的正文里搜关键词（纯本地），
 全部有命令行入口；本地 API 在同一套 Core 上跑起来了；桌面端最小闭环可用。
 
@@ -62,7 +62,7 @@ CLI · API        已实现（含鉴权）
 桌面端           最小闭环
 ```
 
-796 个测试通过（另有 1 个跳过），覆盖率 86.2%，Ruff 与 Pyright 干净，CI 全绿。
+Rust 工作区单元测试、集成测试、API/CLI 端到端测试与示例书源夹具测试全部通过，Clippy 零告警，CI 全绿。
 
 缺口、里程碑对照和下一步看 **[项目进度](docs/progress.md)** —— 进度信息只在那份文档里维护。
 
@@ -92,25 +92,26 @@ CLI · API        已实现（含鉴权）
 
 ```
 MoGrab-CLI/
-├── mog.exe
-├── _internal/
+├── mog.exe        （Linux 下为 mog，单二进制，无需运行时）
+├── LICENSE
+├── THIRD_PARTY_LICENSES.md
 └── data/          ← 首次运行自动创建，也可 `mog init` 显式建出来
 ```
 
-**自带 Python 运行时，不需要装 Python、uv 或任何依赖。**
+**原生单二进制发布，不需要安装任何运行时或依赖。**
 整个目录可以拷到 U 盘上带走，`data/` 跟着走。
 
 ### 方式二：从源码跑（开发用）
 
-需要 Python 3.11+ 和 [uv](https://github.com/astral-sh/uv)：
+需要 Rust 工具链（`rustc` / `cargo`，edition 2024）：
 
 ```bash
 git clone https://github.com/luoqingciya/mograb.git
 cd mograb
-uv sync --all-packages
+cargo build --workspace
 
-uv run mog --help          # 跑 CLI
-uv run pytest -q           # 跑测试
+cargo run --bin mog -- --help    # 跑 CLI
+cargo test --workspace           # 跑测试
 ```
 
 开发时数据落在 `<仓库根>/data/`（已在 `.gitignore` 里排除），
@@ -304,8 +305,7 @@ mog book --json | jq '.[0].id'
 
 ```
 <程序目录>/
-├── mog.exe
-├── _internal/
+├── mog.exe              （或 mog / mograb-api）
 └── data/
     ├── config.toml
     ├── token            ← API 访问令牌，首次启动自动生成
@@ -367,25 +367,28 @@ HTTPS_PROXY=http://127.0.0.1:7890 mog download --url ... --source ...
 
 ```
 MoGrab/
-├── packages/mograb/     核心库
-│   └── src/mograb/
-│       ├── app.py       composition root（CLI 与 API 共用）
-│       ├── domain/      领域模型
-│       ├── source/      书源加载、校验、执行、fixture 测试
-│       ├── network/     HTTP、缓存、限流、重试
-│       ├── task/        队列、Worker、调度
-│       ├── storage/     ORM、仓储、SQLite
-│       ├── content/     清洗、规范化、校验
-│       ├── export/      TXT / Markdown / EPUB
-│       ├── config/      配置与路径
-│       └── logging/     结构化日志
+├── Cargo.toml                 Rust 工作区根
+├── crates/
+│   ├── mograb-core/           核心库
+│   │   ├── migrations/        SQLite 迁移脚本
+│   │   └── src/
+│   │       ├── app.rs         composition root（CLI 与 API 共用）
+│   │       ├── domain/        领域模型
+│   │       ├── source/        书源加载、校验、执行、fixture 测试
+│   │       ├── network/       HTTP、缓存、限流、重试
+│   │       ├── task/          队列、Worker、调度
+│   │       ├── storage/       SQLx 仓储、SQLite
+│   │       ├── content/       清洗、规范化、校验
+│   │       ├── export/        TXT / Markdown / EPUB
+│   │       ├── config/        配置与路径
+│   │       └── logging/       结构化日志
+│   ├── mograb-api/            本地 API，Axum（二进制 mograb-api）
+│   └── mograb-cli/            命令行，clap（二进制 mog）
 ├── apps/
-│   ├── cli/             命令行，命令名 mog
-│   ├── api/             本地 API，FastAPI
-│   └── desktop/         桌面端，Electron
-├── sources/             本地书源工作区（不进仓库）
-├── tests/               单元 / 集成 / 书源 fixture
-└── docs/                文档
+│   └── desktop/               桌面端，Electron + TypeScript
+├── sources/                   本地书源工作区（不进仓库）
+├── tests/fixtures/            书源离线夹具
+└── docs/                      文档
 ```
 
 书源不进远程仓库 —— 涉及第三方站点的抓取规则不适合随主仓库分发。
@@ -395,8 +398,8 @@ MoGrab/
 架构上就一条硬规则：CLI 和桌面端都不许自己实现业务逻辑，一切走 Core 或 API。
 其他的边界写在[架构总览](docs/architecture/overview.md)里。
 
-版本号只有一个来源，仓库根的 [`VERSION`](VERSION) 文件。三个包构建时都读它，
-改一处全局生效。
+版本号以根目录 [`Cargo.toml`](Cargo.toml) 的 `[workspace.package].version` 与 [`VERSION`](VERSION)
+为唯一基准，核心库单元测试会自动校验两者一致。
 
 ## 文档
 
