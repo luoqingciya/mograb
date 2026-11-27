@@ -133,80 +133,56 @@ SHA256SUMS.txt
 GitHub Release（预发布版本自动标 prerelease）
 ```
 
-`Verify` 会把 `version` 和 `prerelease` 两个属性导出给后面的 job ——
-后者由 `scripts/version.py flags` 判定（内部用 `packaging`，
-不手写正则：「哪些后缀算预发布」是 PEP 440 定义的，手写迟早漏掉 `.post` 之类）。
+`Verify` 会把 `version` 和 `prerelease` 两个属性导出给后面的 job（Tag 中包含 `-` 时自动标为预发布）。
 
 ### 3.4 产物清单
 
-以 `1.0.0rc8` 为例：
+以 `1.0.0-rc.9` 为例，统一命名为 `mograb-<component>-v<version>-<os>-<arch>[-setup].<ext>`：
 
 | 产物 | 类型 | 说明 |
 |------|------|------|
-| `MoGrab-CLI-v1.0.0rc8-win-x64.zip` | 目录型便携 CLI | 解压即用，含完整运行时 |
-| `MoGrab-v1.0.0rc8-win-x64.zip` | Portable Desktop | Electron + 后端 sidecar |
-| `MoGrab-Setup-v1.0.0rc8-win-x64.exe` | NSIS 安装包 | 安装 / 卸载 / 快捷方式 |
-| `MoGrab-CLI-v1.0.0rc8-linux-x64.tar.gz` | Linux CLI | |
+| `mograb-cli-v1.0.0-rc.9-linux-x64.tar.gz` | Linux CLI | 单二进制 `mog`（顶层目录 `mograb-cli/`） |
+| `mograb-cli-v1.0.0-rc.9-windows-x64.zip` | Windows CLI | 单二进制 `mog.exe`（顶层目录 `mograb-cli/`） |
+| `mograb-desktop-v1.0.0-rc.9-linux-x64.deb` | Linux Desktop (DEB) | Debian / Ubuntu 安装包，内置 `mograb-api` |
+| `mograb-desktop-v1.0.0-rc.9-linux-x64.rpm` | Linux Desktop (RPM) | Fedora / RHEL 安装包，内置 `mograb-api` |
+| `mograb-desktop-v1.0.0-rc.9-windows-x64.zip` | Windows Desktop 便携版 | Electron + `mograb-api.exe` |
+| `mograb-desktop-v1.0.0-rc.9-windows-x64-setup.exe` | Windows Desktop 安装包 | NSIS 安装 / 卸载 / 快捷方式 |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
-命名统一带 `v` 前缀，桌面端两个产物用 `MoGrab-` 和 `MoGrab-Setup-` 区分 ——
-一个 Portable 一个安装包，名字一样只靠扩展名区分太容易拿错。
-产物名在 `apps/desktop/package.json` 的 `win.artifactName` / `nsis.artifactName`
-里配，CLI 侧在 Release 工作流里拼。
+产物名在 `apps/desktop/package.json` 的 `win.artifactName` / `nsis.artifactName` / `linux.artifactName` / `deb.artifactName` / `rpm.artifactName` 中配置，CLI 侧在 `.github/workflows/release.yml` 拼装。
 
-桌面端产物来自 `npm run build` + `electron-builder`，后端 sidecar 单独打包后
-放进 `resources/backend/`。版本号通过 `--config.extraMetadata.version` 从 tag 传入，
+桌面端产物来自 `npm run build` + `electron-builder`，后端 sidecar（`mograb-api`）放进 `resources/backend/`。版本号通过 `--config.extraMetadata.version` 从 tag 传入，
 不去改 `package.json` —— 改了会让 `package-lock.json` 里的版本对不上。
 
 ### 3.5 打包原则
 
 | 原则 | 说明 |
 |------|------|
-| uv 不进产物 | uv 仅属于开发与构建链路 |
-| 用户无需安装 Python | 运行时随产物分发 |
-| 用户无需安装 Node.js | Electron 打包后自带 |
-| 不要求单文件 EXE | 优先保证启动稳定性、依赖完整性、升级便利性 |
-| 数据在程序目录下的 `data/` | 便携模式，升级时只替换程序文件，`data/` 原样保留 |
-
-为什么不用单文件 EXE：单文件模式每次启动都要解压到临时目录，启动慢，
-而且容易被杀软误报。目录型（onedir）启动更快、体积可预期、升级也容易 ——
-换个可执行文件就行。
+| 用户无需安装 Rust 或 Node.js | 原生单二进制随包分发，Electron 自带运行时 |
+| Windows 便携模式 | 数据落在程序目录下的 `data/`，升级时可原样保留 |
+| Linux XDG 数据目录 | `.deb`/`.rpm` 安装在只读目录，数据默认落入 `~/.local/share/mograb`（支持 `MOGRAB_HOME`） |
 
 ---
 
 ## 4. 本地构建预演
 
 ```bash
-# 安装打包依赖，并强制重装工作区包（版本号改了就必须做，见 §6）
-uv sync --all-packages --group build \
-  --reinstall-package mograb --reinstall-package mograb-cli --reinstall-package mograb-api
+VERSION=$(tr -d '[:space:]' < VERSION)
 
-VERSION=$(uv run python scripts/version.py show)
+# 构建 CLI 与 API 二进制
+cargo build --release --locked --bins
+./target/release/mog --version    # 应输出 mog (MoGrab) $VERSION
 
-# 构建 CLI（PyInstaller onedir）
-uv run python scripts/build.py cli --version "$VERSION"
+# 准备桌面端 sidecar（Linux 示例；Windows 为 mograb-api.exe）
+mkdir -p release-artifacts/backend
+cp target/release/mograb-api release-artifacts/backend/
 
-# 构建 Desktop 后端 sidecar（必须在 electron-builder 之前，它要放进 resources/）
-uv run python scripts/build.py backend --version "$VERSION"
-
-# 验证产物里的版本号没写错
-./release-artifacts/MoGrab-CLI/mog.exe --version    # 应输出 $VERSION
-
-# 桌面端（NSIS + ZIP）
-(cd apps/desktop && npx electron-builder --win --publish never \
+# Linux 桌面端（deb + rpm）
+(cd apps/desktop && npm run build && npx electron-builder --linux deb rpm --publish never \
   --config.extraMetadata.version="$VERSION")
 
-# 生成校验和
-uv run python scripts/release.py checksums --dir release-artifacts
-
-# 校验
-uv run python scripts/release.py verify --dir release-artifacts
-
 # 提取发布说明
-uv run python scripts/release.py notes --version "$VERSION"
-
-# 清理
-uv run python scripts/build.py clean
+python3 scripts/release.py notes --version "$VERSION"
 ```
 
 ---
