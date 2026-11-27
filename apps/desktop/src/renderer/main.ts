@@ -3,6 +3,14 @@
 // 渲染进程入口：等 Tauri 后端就绪后加载完整功能页签。
 
 import type { SearchItem } from '../shared/types.js';
+import {
+  THEME_MODE_LABEL,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+  nextThemeMode,
+  normalizeThemeMode,
+  resolveTheme,
+} from '../shared/theme.js';
 import { ApiError, configure, createTask, listSources } from './api.js';
 import { el, replace, requireElement } from './dom.js';
 import { createFindView } from './views/find.js';
@@ -67,6 +75,56 @@ const PAGES: Page[] = [
 
 let current: View | null = null;
 let noticeTimer: number | undefined;
+let currentThemeMode: ThemeMode = 'dark';
+const colorSchemeMedia =
+  typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: light)')
+    : null;
+
+function readSavedThemeMode(): ThemeMode {
+  try {
+    return normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'dark';
+  }
+}
+
+function writeSavedThemeMode(mode: ThemeMode): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+  } catch {
+    // 忽略无存储权限环境
+  }
+}
+
+function updateThemeButton(): void {
+  const button = document.querySelector<HTMLButtonElement>('#theme-toggle');
+  if (button) {
+    button.textContent = `主题：${THEME_MODE_LABEL[currentThemeMode]}`;
+  }
+}
+
+function applyTheme(): void {
+  const prefersLight = colorSchemeMedia?.matches ?? false;
+  document.documentElement.dataset['theme'] = resolveTheme(currentThemeMode, prefersLight);
+  updateThemeButton();
+}
+
+function initTheme(): void {
+  currentThemeMode = readSavedThemeMode();
+  applyTheme();
+  colorSchemeMedia?.addEventListener('change', () => {
+    if (currentThemeMode === 'system') {
+      applyTheme();
+    }
+  });
+}
+
+function cycleThemeMode(): void {
+  currentThemeMode = nextThemeMode(currentThemeMode);
+  writeSavedThemeMode(currentThemeMode);
+  applyTheme();
+}
 
 function switchTo(pageId: string, arg?: unknown): void {
   const page = PAGES.find((candidate) => candidate.id === pageId);
@@ -104,12 +162,15 @@ function notify(message: string, kind: 'info' | 'error' = 'info'): void {
     window.clearTimeout(noticeTimer);
     noticeTimer = undefined;
   }
-  replace(bar, el('span', { class: kind === 'error' ? 'error' : 'muted' }, message));
-  bar.classList.toggle('visible', message !== '');
-  if (message !== '') {
+  replace(bar, el('span', {}, message));
+  const visible = message !== '';
+  bar.classList.toggle('visible', visible);
+  bar.classList.toggle('notice-error', visible && kind === 'error');
+  bar.classList.toggle('notice-info', visible && kind !== 'error');
+  if (visible) {
     noticeTimer = window.setTimeout(() => {
       replace(bar);
-      bar.classList.remove('visible');
+      bar.classList.remove('visible', 'notice-info', 'notice-error');
       noticeTimer = undefined;
     }, 6000);
   }
@@ -151,6 +212,17 @@ async function handleDirectDownload(sourceId: string, url: string): Promise<void
 
 function buildSidebar(): void {
   const sidebar = requireElement<HTMLElement>('#sidebar');
+  const themeBtn = el(
+    'button',
+    {
+      id: 'theme-toggle',
+      class: 'btn btn-sm theme-toggle',
+      type: 'button',
+      title: '切换深色 / 浅色 / 跟随系统主题',
+      onclick: cycleThemeMode,
+    },
+    `主题：${THEME_MODE_LABEL[currentThemeMode]}`,
+  );
   replace(
     sidebar,
     el('div', { class: 'brand' }, 'MoGrab'),
@@ -166,6 +238,7 @@ function buildSidebar(): void {
         page.label,
       ),
     ),
+    el('div', { class: 'sidebar-footer' }, themeBtn),
   );
 }
 
@@ -190,6 +263,7 @@ async function waitForBackend(): Promise<BackendInfo> {
 }
 
 async function bootstrap(): Promise<void> {
+  initTheme();
   buildSidebar();
   showStartingPlaceholder();
 

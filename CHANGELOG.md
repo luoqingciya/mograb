@@ -5,6 +5,24 @@
 
 版本号以仓库根的 [`VERSION`](VERSION) 与 [`Cargo.toml`](Cargo.toml) 为唯一基准。
 
+## [1.0.0-rc11] - 2026-11-27
+
+优化桌面端视觉对比度、文字可见性与主题切换能力，并调整预发布版本命名规范。
+
+### 改进（桌面端对比度与主题）
+
+- **对比度与文字可读性重构（`apps/desktop/src/renderer/styles.css`）**：
+  - 将主按钮、激活态导航/标签、语义状态与徽章、通知横幅（`.notice-info` / `.notice-error`）、禁用控件与缺失章节项全部调整为满足 WCAG AA（≥ 4.5:1）及 AAA 正文（≥ 7.0:1）的高对比度实色配色，并加入 `:focus-visible` 焦点环与明确层次差。
+  - 为深/浅两套主题分别声明 `color-scheme`，补全 `select.input option`、`::placeholder`、`checkbox` 与滚动条样式，修复 Windows WebView2 / Linux WebKitGTK 原生控件可见性问题。
+- **深色 / 浅色 / 跟随系统主题切换（`apps/desktop/src/shared/theme.ts`、`apps/desktop/src/renderer/main.ts`）**：
+  - 侧边栏底部新增主题切换按钮，支持 `localStorage` 持久化与系统浅色偏好监听；同步更新 Tauri 初始窗口背景色（`#11141b`）。
+- **自动化对比度与主题单测（`apps/desktop/test/contrast.test.mjs`）**：
+  - 自动校验 Dark / Light 两套色板全部关键前/背景与控件边框组合的 WCAG 2.1 对比度指标及主题切换纯函数。
+
+### 变更
+
+- **预发布版本号调整为 `1.0.0-rc11`**：规避 GitHub Releases 同日回退按 `tag_name` 字典序排序导致 `v1.0.0-rc.10` 排在 `v1.0.0-rc.9` 后面的问题。
+
 ## [1.0.0-rc.10] - 2026-11-27
 
 桌面端由 Electron 迁移至 **Tauri v2 + 进程内嵌入 `mograb-api`**，并补全全部 6 个桌面端功能页面。
