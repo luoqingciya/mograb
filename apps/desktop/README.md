@@ -1,129 +1,93 @@
 # MoGrab Desktop
 
-Electron 桌面客户端（**仅 Windows**）。
+Tauri v2 桌面客户端（Windows & Linux）。
 
 ## 定位
 
-Desktop = **Electron + MoGrab Local API（Sidecar）**，不是一个独立实现的下载器。
+Desktop = **Tauri v2 + 进程内嵌入的 `mograb-api`**（不再依赖 Electron 与独立 sidecar 子进程），UI 层只负责展示与交互，核心业务逻辑完全走本地 API 与 `mograb-core`。
 
 ```
-Electron (UI)
-     │  REST + SSE
+Tauri WebView (TypeScript ES Modules)
+     │  Tauri IPC (`backend_wait`) + REST/SSE (`127.0.0.1:48721`)
      ▼
-mograb-api (Sidecar)
+mograb-api (Axum, in-process)
      │
      ▼
-MoGrab Core
+mograb-core
 ```
 
 ## 职责边界
 
 Desktop **只负责**：UI 与状态展示、任务控制、配置、书架、书源管理、日志查看。
 
-**禁止**在 Electron 中实现：解析器、下载器、数据库、书源执行器。
+**禁止**在前端层实现：解析器、下载器、数据库、书源执行器。
 
 ## 目录结构
 
 ```
 apps/desktop/
 ├── src/
-│   ├── main/            主进程（Node 环境）
-│   │   ├── index.ts     窗口与应用生命周期
-│   │   ├── backend.ts   后端 sidecar 的启动、健康检查、读令牌
-│   │   └── preload.ts   contextBridge（沙箱下必须是 CommonJS）
-│   ├── renderer/        渲染进程（浏览器环境）
+│   ├── renderer/             前端代码（浏览器原生 ES Modules）
 │   │   ├── index.html
 │   │   ├── styles.css
-│   │   ├── main.ts      入口：等后端就绪、配置客户端、搭界面、切页
-│   │   ├── api.ts       本地 API 客户端
-│   │   ├── sse.ts       SSE 读取端（fetch + 手写解析 + 重连）
-│   │   ├── dom.ts       极简 DOM 辅助
-│   │   └── views/       各页面
+│   │   ├── env.d.ts          window.__TAURI__.core.invoke 类型声明
+│   │   ├── main.ts           入口：invoke('backend_wait') 等后端就绪、搭界面
+│   │   ├── api.ts            本地 API 客户端
+│   │   ├── sse.ts            SSE 读取端（fetch + 手写解析 + 重连）
+│   │   ├── dom.ts            极简 DOM 辅助
+│   │   └── views/            各页面
 │   └── shared/
-│       └── types.ts     与 API 契约对应的类型
-├── test/sse.test.mjs    SSE 解析器的测试（node:test）
+│       └── types.ts          与 API 契约对应的类型
+├── src-tauri/                Tauri v2 Rust 宿主 crate
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs
+│   ├── tauri.conf.json
+│   ├── capabilities/default.json
+│   ├── icons/
+│   └── src/
+│       ├── main.rs
+│       └── lib.rs            进程内启动/复用 mograb-api、导航守卫与优雅退出
+├── test/sse.test.mjs         SSE 解析器的测试（node:test）
 ├── scripts/copy-static.mjs
+├── package.json
 ├── tsconfig.base.json
-├── tsconfig.main.json      主进程 → CommonJS
-└── tsconfig.renderer.json  渲染层 → ES modules
+└── tsconfig.renderer.json    渲染层 → ES modules
 ```
 
 ## 构建方式
 
-**TypeScript + tsc，不引打包器。**
+**TypeScript + tsc（零 bundler）+ Tauri v2 (`tauri.conf.json`)。**
 
-渲染层用原生 ES modules（`<script type="module">`），所以不需要 bundler ——
-`tsc` 编译完 Electron 直接加载。代价是没有热更新（用 `tsc --watch` 加手动刷新）。
+- 前端使用原生 ES modules（`<script type="module">`），`npm run build` 把 HTML/CSS 与编译产物统一产出到 `dist/`（`frontendDist: "../dist"`）。
+- `apps/desktop/src-tauri` 直接链接工作区内的 `mograb-core` 与 `mograb-api` crate，打包时产出的单二进制客户端自带后端服务，无需额外 sidecar。
+- Linux 下打包安装运行于只读系统目录时，数据默认落入 `$XDG_DATA_HOME/mograb`（即 `~/.local/share/mograb`）；Windows 与本地开发模式跟随便携/仓库 `data/`，也可通过 `MOGRAB_HOME` 显式指定。
 
-两份 tsconfig 是必须的：主进程跑在 Node 里要 CommonJS，渲染层跑在浏览器里
-要 ES modules。开 `sandbox` 时 preload 必须是 CommonJS，这也是 Electron 的限制。
-
-版本号**不在构建时写进 `package.json`** —— 那样会让 `package-lock.json` 里的版本
-对不上，`npm ci` 有风险。打包时通过 `--config.extraMetadata.version` 传进来
-（见 `.github/workflows/release.yml`）。界面要显示版本就读后端 `/health`。
-
-## 开发
+## 开发与打包
 
 ```bash
 cd apps/desktop
 npm install
-npm start          # 编译 + 启动；后端会自动拉起
-npm run typecheck  # 只做类型检查
-npm run build      # 只编译
+npm run typecheck  # 类型检查
+npm run build      # 构建 dist/
 npm test           # SSE 解析器的单元测试
+npm run dev        # 启动 Tauri 开发窗口（Linux 需先安装 webkit2gtk-4.1 等系统依赖）
+npm run pack       # Windows: 生成 NSIS 安装包
+npm run pack:linux # Linux: 生成 .deb 与 .rpm 安装包
 ```
 
-后端由主进程自动拉起：打包后找 `resources/backend/mograb-api.exe`，
-开发时用仓库里的 uv 环境跑 `mograb-api`。如果端口上已经有实例在跑（比如你
-手动 `mog server start` 过），会直接复用它，不会重复启动。
+## 鉴权与安全基线
 
-### 两个容易踩的点
+- API 的每个业务端点均要求 `Authorization: Bearer <token>`。后端在进程内初始化后，通过 `backend_wait` IPC 命令将 `{ baseUrl, token }` 安全递交给前端；SSE 仍通过带请求头的 `fetch` 流式读取。
+- `tauri.conf.json` 启用严格 CSP（仅允许 `'self'`、Tauri IPC 与 `http://127.0.0.1:48721`），并在 Rust 宿主层通过 `on_navigation` 拦截一切外部 URL 跳转。
 
-**环境里如果有 `ELECTRON_RUN_AS_NODE=1`，Electron 会被当成 Node 跑**，
-启动时报 `Cannot read properties of undefined (reading 'whenReady')`。
-清掉这个变量再启动：
+## 已实现页面
 
-```bash
-env -u ELECTRON_RUN_AS_NODE npx electron .
-```
-
-**视图只在拿到后端地址之后创建。** 视图一被创建就会发请求（任务页还会立刻
-订阅 SSE），而配置是异步到位的。顺序错了的话，相对路径会被解析成
-`file:///D:/tasks/events`，然后被 CSP 拦下 —— 报出来的是「违反内容安全策略」，
-完全指不到真正的原因。`main.ts` 里的顺序是有意的，别调换。
-
-## 鉴权
-
-API 的每个业务端点都要求 `Authorization: Bearer <token>`。
-
-令牌由后端生成在 `<数据目录>/token`，主进程在健康检查通过后读它，
-经 preload 递给渲染进程（渲染进程开了 sandbox，拿不到文件系统）。
-
-**SSE 用 `fetch` 读流，不用 `EventSource`** —— 后者不能设置请求头，
-而令牌不能走查询参数（会出现在服务端访问日志里）。见 `src/renderer/sse.ts`。
-
-## 当前进度
-
-最小闭环已跑通：**搜索 → 点下载 → 看任务进度**。
-
-| 页面 | 状态 |
-|------|------|
-| 搜索 | 可用 |
-| 下载（任务） | 可用，SSE 实时进度 |
-| 书架 | 占位 |
-| 书源管理 | 占位 |
-| 设置 | 占位 |
-
-## 安全基线
-
-- `contextIsolation: true`
-- `nodeIntegration: false`
-- `sandbox: true`
-- CSP：`script-src 'self'`，`connect-src` 只放行本地 API
-- 外部链接交给系统浏览器，不在应用内开新窗口
-- 渲染进程只能通过 preload 暴露的 `window.mograb` 拿后端地址和令牌，
-  业务请求直接 `fetch` 本地 API
-
-## 许可证
-
-GPL-3.0-only
+| 页面 | 功能范围 |
+|------|----------|
+| 搜索 (`views/search.ts`) | 跨启用书源筛选搜索、按书籍详情页 URL 直链下载 |
+| 书架 (`views/shelf.ts`) | 本地藏书列表与过滤、章节目录、内置正文阅读器（字号调节/翻章）、增量检查更新、EPUB/TXT/Markdown 导出 |
+| 全文检索 (`views/find.ts`) | 本地章节正文关键词检索（按书筛选与高亮）、一键跳转至对应章节阅读 |
+| 任务 (`views/tasks.ts`) | 状态过滤、SSE 实时进度条、暂停/继续/取消/重试控制、近期导出记录 |
+| 书源 (`views/sources.ts`) | 粘贴 YAML / 本机文件路径安装、启用/禁用、在线体检、网络权限/路径详情查看、重新扫描与卸载 |
+| 设置 (`views/settings.ts`) | 运行模式与路径查看、`config.toml` 核心参数修改保存、SQLite HTTP 缓存统计与清理 |

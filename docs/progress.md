@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-11-27 · 当前版本 `1.0.0-rc.9`（预发布，Rust 迁移与 Linux `.deb`/`.rpm` 支持完成）
+> 更新于 2026-11-27 · 当前版本 `1.0.0-rc.10`（预发布，桌面端迁至 Tauri v2 并补全全部功能）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -8,19 +8,18 @@
 ## 一句话
 
 核心链路已由 Python 完整迁移至纯 Rust Cargo 工作区（`mograb-core` / `mograb-api` / `mograb-cli`），
-保持所有已冻结 v1 规范（Source Spec v1、Domain Model v1、Storage v1、API v1）完全兼容。
-命令行、本地 API（24 条路径 + SSE + Bearer 鉴权）、本地全文搜索（`mog find` / `GET /api/v1/search/local`）
-与 Electron 桌面端后端启动链路全部打通；桌面端目前仍为最小闭环，书架、书源管理、设置待补完。
+保持所有已冻结 v1 规范（Source Spec v1、Domain Model v1、Storage v1、API v1）完全兼容；
+桌面端已由 Electron 迁移至 **Tauri v2**（进程内直接嵌入 `mograb-api`），全部 6 个页面（搜索、书架与内置阅读器、全文检索、任务与导出历史、书源管理、设置与缓存运维）均已打通。
 
 ## 质量指标
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
 | 核心库测试 | `mograb-core` 35 项测试通过（含 `example-source` 4 能力夹具与端到端模拟下载/EPUB 导出） | `cargo test -p mograb-core` |
-| API 测试 | `mograb-api` 3 项测试通过（鉴权、24 路径 OpenAPI、SSE、任务状态机与错误码） | `cargo test -p mograb-api` |
+| API 测试 | `mograb-api` 4 项测试通过（CORS、鉴权、24 路径 OpenAPI、SSE、任务状态机与错误码） | `cargo test -p mograb-api` |
 | CLI 测试 | `mograb-cli` 4 项端到端集成测试通过（直接运行 `mog` 二进制） | `cargo test -p mograb-cli` |
 | 静态检查 | `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` | 本地或 CI `lint` job |
-| 桌面端测试 | 14 | `cd apps/desktop && npm test` |
+| 桌面端前端测试 | 18 | `cd apps/desktop && npm test` |
 
 ## 里程碑
 
@@ -200,17 +199,11 @@ cover / publisher / created_at`，并注明「允许用户通过模板配置」�
 |--------------|------|------|
 | `crates/mograb-cli` | 完成 | `mog` 二进制，14 组命令（clap） |
 | `crates/mograb-api` | 完成 | `mograb-api` 二进制，24 条路径 / 28 个端点（Axum + utoipa + SSE），全业务端点强制 Bearer 鉴权 |
-| `apps/desktop` | 最小闭环 | 搜索 → 下载 → 任务进度可用；书架 / 书源 / 设置是占位 |
+| `apps/desktop` | 完成（Tauri v2） | 搜索、书架与内置阅读器、全文检索、任务生命周期与导出历史、书源管理、设置与缓存清理 |
 
 ## 已知缺口
 
 按影响排。
-
-### 高
-
-**桌面端只做了最小闭环。** 搜索、下载、任务进度能用，书架 / 书源管理 / 设置
-还是占位页。先跑通闭环是为了验证「Electron + 本地 API + SSE」这套架构真的成立 ——
-现在验证过了，剩下的是照着补页面。
 
 ### 中
 

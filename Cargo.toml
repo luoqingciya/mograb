@@ -5,9 +5,10 @@ members = [
     "crates/mograb-api",
     "crates/mograb-cli",
 ]
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "1.0.0-rc.9"
+version = "1.0.0-rc.10"
 edition = "2024"
 license = "GPL-3.0-only"
 authors = ["MoGrab Contributors"]

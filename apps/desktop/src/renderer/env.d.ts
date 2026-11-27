@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // 渲染进程看到的全局声明。
-// preload 通过 contextBridge 挂上来的东西在这里补类型。
+// Tauri v2 在 `withGlobalTauri: true` 下通过 `window.__TAURI__.core.invoke` 注入 IPC。
 
 interface BackendInfo {
   /** API 根地址，如 http://127.0.0.1:48721/api/v1。 */
@@ -10,11 +10,12 @@ interface BackendInfo {
   token: string;
 }
 
-interface MoGrabBridge {
-  /** 等后端就绪，返回 API 根地址与访问令牌。 */
-  waitForBackend(): Promise<BackendInfo>;
+interface TauriCoreApi {
+  invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
 }
 
 interface Window {
-  readonly mograb: MoGrabBridge;
+  readonly __TAURI__?: {
+    readonly core: TauriCoreApi;
+  };
 }

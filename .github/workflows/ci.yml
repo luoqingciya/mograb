@@ -152,13 +152,11 @@ jobs:
           kill "$api_pid" || true
 
   # ---------------------------------------------------------------------------
-  # 桌面端（TypeScript 编译 + 类型检查 + SSE 解析器测试）
+  # 桌面端前端（TypeScript 编译 + 类型检查 + SSE 解析器测试）
   # ---------------------------------------------------------------------------
   desktop:
     name: Desktop (tsc)
     runs-on: ubuntu-latest
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -184,3 +182,55 @@ jobs:
       - name: Test
         working-directory: apps/desktop
         run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 桌面端 Tauri 宿主（Ubuntu 22.04 + Windows）
+  # ---------------------------------------------------------------------------
+  desktop-tauri:
+    name: Desktop Tauri (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          prefix-key: "v2-tauri-${{ matrix.os }}"
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Build frontend assets
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+
+      - name: Format check (Tauri)
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+
+      - name: Clippy (Tauri)
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test (Tauri)
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked

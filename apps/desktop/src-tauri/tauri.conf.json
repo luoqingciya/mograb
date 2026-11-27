@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MoGrab",
+  "version": "1.0.0-rc.10",
+  "identifier": "org.mograb.desktop",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:48721"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "nsis"],
+    "license": "GPL-3.0-only",
+    "category": "Utility",
+    "shortDescription": "MoGrab — 开源的小说抓取与电子书整理工具",
+    "longDescription": "MoGrab Desktop (Tauri v2) — 模块化、桌面优先的网络小说抓取与电子书整理工具。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3"]
+      }
+    }
+  }
+}

@@ -10,65 +10,43 @@
 ```
 push / PR → main
         ↓
-┌───────────────────────────────────────────┐
-│ lint          ruff check + format --check │
-│               + 文档内链校验               │
-│ version       VERSION 格式与来源唯一性     │
-│ type-check    pyright                     │
-│ test          矩阵：{3.11,3.12} × {linux,windows} │
-│ source-lint   参考书源 lint + 真跑一遍提取 │
-│ build         uv build --all-packages     │
-│ package-smoke 打 PyInstaller 产物并真跑一遍 │
-│ desktop       npm ci + tsc + SSE 解析器测试 │
-└───────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ lint          cargo fmt --check + clippy -D warnings │
+│               + 文档内链校验                           │
+│ test          矩阵：{ubuntu-latest, windows-latest}   │
+│               工作区全部测试 + example-source lint/test│
+│ build-smoke   Release 二进制构建与端到端冒烟            │
+│ desktop       npm ci + tsc + SSE 解析器测试           │
+│ desktop-tauri 矩阵：{ubuntu-22.04, windows-latest}    │
+│               Tauri 宿主 fmt / clippy / test          │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### 1.1 设计要点
 
 | 决策 | 理由 |
 |------|------|
-| `uv sync --locked` | 强制 lock 与 pyproject 一致，防止本地能跑 CI 不能跑 |
-| 测试矩阵含 Windows | 桌面端只支持 Windows，路径和编码问题要早发现 |
-| desktop job 设 `ELECTRON_SKIP_BINARY_DOWNLOAD` | 类型检查、tsc 编译和 SSE 解析器测试都用不到 Electron 二进制，省一次上百兆的下载 |
-| `version` 独立成 job | 版本号来源出问题会让发版直接失败，值得单独可见 |
-| 文档内链校验并入 `lint` | 纯标准库脚本，不需要单独装环境；归在 lint 语义下也说得通 |
-| `source-lint` 独立成 job | 书源问题与代码问题分开定位。这一步既跑 `lint` 也跑 `source test` —— 前者只查规则能不能编译，后者真跑一遍提取，才查得出「选择器写错了、匹配不到东西」 |
-| `package-smoke` 独立成 job | **rc1 发出去的 CLI 和桌面端都是坏的**，而构建、CI、发布三道关全都没拦住 —— 因为都只验「构建成功」，没人真执行过产物。这个 job 打一遍 PyInstaller 产物并真的跑起来 |
-| `package-smoke` 只在 Linux 上打 | 这类问题的根因是「模块没被打进去」，与平台无关。Windows 的打包由 Release 工作流在发版前验证 |
-| `-m "not network"` | 测试默认离线，不依赖外部站点可用性 |
+| `cargo test --locked` | 强制 `Cargo.lock` 与 `Cargo.toml` 一致 |
+| `desktop` 与 `desktop-tauri` 拆分 | 纯前端 TypeScript 测试无需 WebKitGTK/MSVC；Tauri 宿主编译校验独立跑在 Ubuntu 22.04 + Windows 矩阵上 |
+| 文档内链校验并入 `lint` | 避免文档断链合入 `main` |
 | `concurrency.cancel-in-progress` | 同分支的旧运行自动取消，省额度 |
-
-### 1.2 测试标记
-
-| 标记 | 含义 | CI 中 |
-|------|------|-------|
-| `unit` | 纯单元测试 | 运行 |
-| `integration` | 跨层集成 | 运行 |
-| `source` | 书源 fixture（离线） | 运行 |
-| `e2e` | 端到端 | 待补 |
-| `network` | 需要真实网络 | 默认跳过 |
 
 ---
 
 ## 2. 本地复现 CI
 
 ```bash
-uv sync --locked --all-packages
-
-uv run ruff check .
-uv run ruff format --check .
-uv run python scripts/check_docs.py
-uv run pyright
-uv run pytest -m "not network" --cov
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+python3 scripts/check_docs.py
 
 # 书源
-for f in tests/fixtures/**/source.yaml; do uv run mog source lint "$f"; done
+for f in tests/fixtures/**/source.yaml; do cargo run --bin mog -- source lint "$f"; done
+cargo run --bin mog -- source test tests/fixtures/example-source
 
-# 桌面端（测的是编译产物，所以 build 必须排在 test 前面）
+# 桌面端前端（测的是编译产物，所以 build 必须排在 test 前面）
 cd apps/desktop && npm run typecheck && npm run build && npm test && cd -
-
-# 构建
-uv build --all-packages --out-dir dist
 ```
 
 ---
@@ -145,20 +123,20 @@ GitHub Release（预发布版本自动标 prerelease）
 | `mograb-cli-v1.0.0-rc.9-windows-x64.zip` | Windows CLI | 单二进制 `mog.exe`（顶层目录 `mograb-cli/`） |
 | `mograb-desktop-v1.0.0-rc.9-linux-x64.deb` | Linux Desktop (DEB) | Debian / Ubuntu 安装包，内置 `mograb-api` |
 | `mograb-desktop-v1.0.0-rc.9-linux-x64.rpm` | Linux Desktop (RPM) | Fedora / RHEL 安装包，内置 `mograb-api` |
-| `mograb-desktop-v1.0.0-rc.9-windows-x64.zip` | Windows Desktop 便携版 | Electron + `mograb-api.exe` |
+| `mograb-desktop-v1.0.0-rc.9-windows-x64.zip` | Windows Desktop 便携版 | Tauri 单二进制（内嵌 API） |
 | `mograb-desktop-v1.0.0-rc.9-windows-x64-setup.exe` | Windows Desktop 安装包 | NSIS 安装 / 卸载 / 快捷方式 |
 | `SHA256SUMS.txt` | 校验和 | 用于验证下载完整性 |
 
-产物名在 `apps/desktop/package.json` 的 `win.artifactName` / `nsis.artifactName` / `linux.artifactName` / `deb.artifactName` / `rpm.artifactName` 中配置，CLI 侧在 `.github/workflows/release.yml` 拼装。
+CLI 产物与 Windows 便携包在 `.github/workflows/release.yml` 打包归档，桌面端安装包与元数据配置位于 `apps/desktop/src-tauri/tauri.conf.json`。
 
-桌面端产物来自 `npm run build` + `electron-builder`，后端 sidecar（`mograb-api`）放进 `resources/backend/`。版本号通过 `--config.extraMetadata.version` 从 tag 传入，
+桌面端产物来自 `npx tauri build`，宿主二进制直接链接工作区内的 `mograb-api` 与 `mograb-core`。版本号通过 `--config '{"version":"..."}'` 从 tag 传入，
 不去改 `package.json` —— 改了会让 `package-lock.json` 里的版本对不上。
 
 ### 3.5 打包原则
 
 | 原则 | 说明 |
 |------|------|
-| 用户无需安装 Rust 或 Node.js | 原生单二进制随包分发，Electron 自带运行时 |
+| 用户无需安装 Rust 或 Node.js | 原生单二进制随包分发，使用系统 WebView2 / WebKitGTK |
 | Windows 便携模式 | 数据落在程序目录下的 `data/`，升级时可原样保留 |
 | Linux XDG 数据目录 | `.deb`/`.rpm` 安装在只读目录，数据默认落入 `~/.local/share/mograb`（支持 `MOGRAB_HOME`） |
 
@@ -169,17 +147,12 @@ GitHub Release（预发布版本自动标 prerelease）
 ```bash
 VERSION=$(tr -d '[:space:]' < VERSION)
 
-# 构建 CLI 与 API 二进制
-cargo build --release --locked --bins
+# 构建 CLI 二进制
+cargo build --release --locked --bin mog
 ./target/release/mog --version    # 应输出 mog (MoGrab) $VERSION
 
-# 准备桌面端 sidecar（Linux 示例；Windows 为 mograb-api.exe）
-mkdir -p release-artifacts/backend
-cp target/release/mograb-api release-artifacts/backend/
-
-# Linux 桌面端（deb + rpm）
-(cd apps/desktop && npm run build && npx electron-builder --linux deb rpm --publish never \
-  --config.extraMetadata.version="$VERSION")
+# Linux 桌面端（deb + rpm，Tauri 原生打包）
+(cd apps/desktop && npx tauri build --bundles deb,rpm --config "{\"version\":\"$VERSION\"}")
 
 # 提取发布说明
 python3 scripts/release.py notes --version "$VERSION"

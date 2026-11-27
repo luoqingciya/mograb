@@ -29,7 +29,7 @@ pre-commit install              # 安装 Git 钩子（可选）
 ### 1.3 验证环境
 
 ```bash
-cargo run --bin mog -- --version     # mog (MoGrab) 1.0.0-rc.9
+cargo run --bin mog -- --version     # mog (MoGrab) 1.0.0-rc.10
 cargo run --bin mog -- init          # 建出数据目录，幂等
 cargo test --workspace               # 运行全部单元 / 集成 / CLI 测试
 cargo clippy --workspace --all-targets -- -D warnings
@@ -112,7 +112,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48721/api/v1/sources
 | 核心库单测 & 集成测 | `crates/mograb-core/src/**` | Schema、Extractor（CSS/XPath/JSONPath/Regex）、Transformer、Cleaner、EPUB/TXT/MD 导出、SQLite 仓储、Task 状态机与模拟 HTTP 端到端下载 |
 | API 集成测 | `crates/mograb-api/src/lib.rs` | `/health`、Bearer 鉴权、24 条 OpenAPI 路径、SSE 事件流、任务状态机与错误码映射 |
 | CLI 集成测 | `crates/mograb-cli/tests/cli_integration.rs` | 直接执行编译出的 `mog` 二进制，覆盖 exit code、UTF-8 `--json`、`source lint/test/install` |
-| Desktop 测试 | `apps/desktop/test/*.test.mjs` | Electron SSE 解析等前端单元测试 |
+| Desktop 测试 | `apps/desktop/test/*.test.mjs` | Tauri 前端 SSE 解析等单元测试 |
 
 ---
 
