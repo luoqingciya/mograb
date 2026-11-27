@@ -70,7 +70,10 @@
       "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
     },
     "rpm": {
-      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
+      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}",
+      "fpm": [
+        "--verbose"
+      ]
     }
   }
 }
