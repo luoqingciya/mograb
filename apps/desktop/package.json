@@ -1,7 +1,9 @@
 {
   "name": "mograb-desktop",
   "version": "0.0.0",
-  "description": "MoGrab Desktop (Electron) — Windows only. 版本号打包时注入，见 scripts/copy-static.mjs。",
+  "description": "MoGrab Desktop (Electron) — Windows & Linux",
+  "author": "MoGrab Contributors <luoqingciya@users.noreply.github.com>",
+  "homepage": "https://github.com/luoqingciya/mograb",
   "private": true,
   "license": "GPL-3.0-only",
   "main": "dist/main/index.js",
@@ -11,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --win --publish never",
+    "pack:linux": "npm run build && electron-builder --linux deb rpm --publish never",
     "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
@@ -45,12 +48,29 @@
         "nsis"
       ],
       "icon": "../../assets/icon.ico",
-      "artifactName": "MoGrab-v${version}-win-x64.${ext}"
+      "artifactName": "mograb-desktop-v${version}-windows-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "MoGrab-Setup-v${version}-win-x64.${ext}"
+      "artifactName": "mograb-desktop-v${version}-windows-x64-setup.${ext}"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "rpm"
+      ],
+      "icon": "../../assets/icon.png",
+      "category": "Utility",
+      "maintainer": "MoGrab Contributors <luoqingciya@users.noreply.github.com>",
+      "synopsis": "MoGrab — 开源的小说抓取与电子书整理工具",
+      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
+    },
+    "deb": {
+      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
+    },
+    "rpm": {
+      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
     }
   }
 }

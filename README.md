@@ -41,7 +41,7 @@ content:
 
 ## 现在做到哪了
 
-版本 `1.0.0-rc.8`（**预发布**，已完成 Rust 重构迁移）。规范已经定下来，**整条链路都通了** ——
+版本 `1.0.0-rc.9`（**预发布**，Rust 迁移完成并新增 Linux 桌面端 `.deb`/`.rpm`）。规范已经定下来，**整条链路都通了** ——
 装书源、搜书、下载、增量更新、导出、在已下载的正文里搜关键词（纯本地），
 全部有命令行入口；本地 API 在同一套 Core 上跑起来了；桌面端最小闭环可用。
 
@@ -88,10 +88,10 @@ Rust 工作区单元测试、集成测试、API/CLI 端到端测试与示例书�
 ### 方式一：用发布包（推荐）
 
 到 [Releases](https://github.com/luoqingciya/mograb/releases) 下载
-`MoGrab-CLI-v<版本>-win-x64.zip`（Linux 用 `.tar.gz`），解压即用：
+`mograb-cli-v<版本>-windows-x64.zip` 或 `mograb-cli-v<版本>-linux-x64.tar.gz`，解压即用：
 
 ```
-MoGrab-CLI/
+mograb-cli/
 ├── mog.exe        （Linux 下为 mog，单二进制，无需运行时）
 ├── LICENSE
 ├── THIRD_PARTY_LICENSES.md
@@ -117,12 +117,14 @@ cargo test --workspace           # 跑测试
 开发时数据落在 `<仓库根>/data/`（已在 `.gitignore` 里排除），
 和发布包的 `<程序目录>/data/` 是同一套逻辑。
 
-### 方式三：桌面端（Windows）
+### 方式三：桌面端（Windows / Linux）
 
-到 Releases 下载 `MoGrab-Setup-v<版本>-win-x64.exe` 安装，
-或 `MoGrab-v<版本>-win-x64.zip` 解压直接用。
+到 [Releases](https://github.com/luoqingciya/mograb/releases) 下载对应平台产物：
 
-桌面端内置后端 sidecar，启动后自己拉起来，不用手工开服务。
+- **Windows**：`mograb-desktop-v<版本>-windows-x64-setup.exe`（安装包）或 `mograb-desktop-v<版本>-windows-x64.zip`（便携压缩包）
+- **Linux**：`mograb-desktop-v<版本>-linux-x64.deb`（Debian / Ubuntu）或 `mograb-desktop-v<版本>-linux-x64.rpm`（Fedora / RHEL）
+
+桌面端内置原生后端 `mograb-api`，启动后自己拉起来，不用手工开服务（Linux 安装包数据默认落在 `~/.local/share/mograb`，也可通过 `MOGRAB_HOME` 覆盖）。
 
 ## 命令行教程
 

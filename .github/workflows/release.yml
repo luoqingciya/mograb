@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# MoGrab Release —— 原生 Rust 二进制 + Electron Windows 打包流水线。
+# MoGrab Release —— 原生 Rust 二进制 + Electron (Windows / Linux) 打包流水线。
 #
 # 触发方式：
 #   1. 推 v* tag（正式发版）
 #   2. 手动触发（可以只建 draft 做预演）
 #
-# 流程：Verify → 三路并行构建（Win CLI / Win Desktop / Linux CLI）→ SHA256SUMS → GitHub Release
+# 流程：Verify → 四路并行构建（Win CLI / Win Desktop / Linux CLI / Linux Desktop）→ SHA256SUMS → GitHub Release
 
 name: Release
 
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号（不含 v 前缀），必须与 VERSION 和 Cargo.toml 一致，例如 1.0.0-rc.8"
+        description: "版本号（不含 v 前缀），必须与 VERSION 和 Cargo.toml 一致，例如 1.0.0-rc.9"
         required: true
         type: string
       draft:
@@ -119,18 +119,18 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ needs.verify.outputs.version }}"
-          $stage = "release-artifacts/MoGrab-CLI"
+          $stage = "release-artifacts/mograb-cli"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "target/release/mog.exe" "$stage/"
           Copy-Item "LICENSE" "$stage/"
           Copy-Item "THIRD_PARTY_LICENSES.md" "$stage/"
-          Compress-Archive -Path $stage -DestinationPath "MoGrab-CLI-v$version-win-x64.zip"
+          Compress-Archive -Path $stage -DestinationPath "mograb-cli-v$version-windows-x64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: cli-windows
-          path: MoGrab-CLI-*.zip
+          path: mograb-cli-*.zip
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -211,17 +211,75 @@ jobs:
       - name: Stage & Create tar.gz
         run: |
           version="${{ needs.verify.outputs.version }}"
-          stage="release-artifacts/MoGrab-CLI"
+          stage="release-artifacts/mograb-cli"
           mkdir -p "$stage"
           cp target/release/mog "$stage/"
           cp LICENSE THIRD_PARTY_LICENSES.md "$stage/"
-          tar -czf "MoGrab-CLI-v${version}-linux-x64.tar.gz" -C release-artifacts MoGrab-CLI
+          tar -czf "mograb-cli-v${version}-linux-x64.tar.gz" -C release-artifacts mograb-cli
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: cli-linux
-          path: MoGrab-CLI-*.tar.gz
+          path: mograb-cli-*.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Linux Desktop（原生后端 mograb-api + Electron → DEB + RPM）
+  # ---------------------------------------------------------------------------
+  build-desktop-linux:
+    name: Build Desktop (Linux x64)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install RPM packaging dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build backend sidecar (mograb-api)
+        run: cargo build --release --locked --bin mograb-api
+
+      - name: Stage backend sidecar
+        run: |
+          mkdir -p release-artifacts/backend
+          cp target/release/mograb-api release-artifacts/backend/
+          chmod +x release-artifacts/backend/mograb-api
+
+      - name: Install Electron dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build Electron app (DEB + RPM)
+        working-directory: apps/desktop
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          npm run build
+          npx electron-builder --linux deb rpm --publish never --config.extraMetadata.version="$version"
+          ls -lh release/*.deb release/*.rpm
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux
+          path: |
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -229,7 +287,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Create GitHub Release
-    needs: [verify, build-cli-windows, build-desktop-windows, build-cli-linux]
+    needs: [verify, build-cli-windows, build-desktop-windows, build-cli-linux, build-desktop-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -243,7 +301,7 @@ jobs:
       - name: Generate SHA256SUMS.txt
         run: |
           cd artifacts
-          sha256sum * > SHA256SUMS.txt
+          LC_ALL=C sha256sum $(ls -1 | sort) > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Extract release notes from CHANGELOG
@@ -265,6 +323,8 @@ jobs:
             artifacts/*.zip
             artifacts/*.tar.gz
             artifacts/*.exe
+            artifacts/*.deb
+            artifacts/*.rpm
             artifacts/SHA256SUMS.txt
           prerelease: ${{ needs.verify.outputs.prerelease }}
           draft: ${{ inputs.draft == true }}

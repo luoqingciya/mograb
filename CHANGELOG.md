@@ -1,9 +1,37 @@
 # 变更日志
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号遵循 [PEP 440](https://peps.python.org/pep-0440/)。
+版本号遵循 [SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
-版本号只有一个来源：仓库根的 `VERSION` 文件。改它，三个包一起变。
+版本号以仓库根的 [`VERSION`](VERSION) 与 [`Cargo.toml`](Cargo.toml) 为唯一基准。
+
+## [1.0.0-rc.9] - 2026-11-27
+
+Rust Cargo 工作区迁移完成后的首个预发布版本，同时新增 Linux 桌面端（`.deb` / `.rpm`）安装包并统一全部 Release 产物命名。
+
+### 架构与实现
+
+- **全面迁移至纯 Rust Cargo 工作区**（`crates/mograb-core`、`crates/mograb-api`、`crates/mograb-cli`）：
+  - `mograb-core`：采用 `scraper` + `sxd-xpath` + `serde_json_path` + `fancy-regex` + `reqwest`（rustls）+ `encoding_rs` + `sqlx`（SQLite WAL）+ `zip`（EPUB3）纯 Rust 技术栈，保持 `source-spec-v1`、`domain-model-v1`、`storage-v1` 与 `api-v1` 契约完全兼容。
+  - `mograb-api`：基于 Axum + Tokio + `utoipa` 提供 24 条 OpenAPI 路径、SSE 任务事件流与 Bearer 令牌鉴权。
+  - `mograb-cli`：基于 `clap` 提供全部 14 组 `mog` 子命令，产出零外部运行时依赖的单二进制可执行文件。
+
+### 新增
+
+- **Linux 桌面端打包（`.deb` / `.rpm`）**：
+  - `apps/desktop/package.json` 新增 `linux`（`deb`、`rpm`）目标及 `pack:linux` 脚本。
+  - Linux 打包安装运行于只读系统目录（如 `/opt/MoGrab`）时，主进程自动将数据目录回落至 `$XDG_DATA_HOME/mograb`（默认 `~/.local/share/mograb`）并通过 `MOGRAB_HOME` 传递给后端 `mograb-api`；Windows 便携模式与本地开发模式保持不变。
+
+### 变更
+
+- **规整 Release 产物命名**（统一采用 `mograb-<component>-v<version>-<os>-<arch>[-setup].<ext>`）：
+  - `mograb-cli-v<version>-linux-x64.tar.gz`
+  - `mograb-cli-v<version>-windows-x64.zip`
+  - `mograb-desktop-v<version>-linux-x64.deb`
+  - `mograb-desktop-v<version>-linux-x64.rpm`
+  - `mograb-desktop-v<version>-windows-x64.zip`
+  - `mograb-desktop-v<version>-windows-x64-setup.exe`
+  - `SHA256SUMS.txt`
 
 ## [1.0.0rc8] - 2026-10-05
 

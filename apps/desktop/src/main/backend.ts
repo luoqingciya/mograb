@@ -11,6 +11,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { app } from 'electron';
@@ -82,16 +83,34 @@ function resolveCommand(): { command: string; args: string[]; cwd: string } {
 }
 
 /**
+ * 解析数据目录（存放 token、sqlite、covers、exports 等）。
+ *
+ * Linux 下打包安装到只读系统路径（/opt/MoGrab/...）时，回落到 XDG 数据目录；
+ * 开发模式与 Windows 便携包保持跟随运行目录的 `data/`。
+ */
+function resolveDataDir(): string {
+  const override = process.env.MOGRAB_HOME?.trim();
+  if (override) {
+    return override;
+  }
+  if (app.isPackaged && process.platform !== 'win32') {
+    const xdg = process.env.XDG_DATA_HOME?.trim() || join(homedir(), '.local', 'share');
+    return join(xdg, 'mograb');
+  }
+  return join(backendRunDir(), 'data');
+}
+
+/**
  * 读后端的 API 令牌。
  *
  * 令牌由后端启动时生成在 ``<数据目录>/token``。这里不自己生成 ——
- * 生成规则只有一份（在 mograb.config.token 里），两处各写一份迟早会走样。
+ * 生成规则只有一份（在 mograb-core 里），两处各写一份迟早会走样。
  *
- * 之所以要轮询：端口打开和令牌写盘之间理论上可能有窗口，虽然 ``run()``
+ * 之所以要轮询：端口打开和令牌写盘之间理论上可能有窗口，虽然启动流程
  * 里已经把生成提到 bind 之前，多等几毫秒换一个确定的失败信息是划算的。
  */
 async function readToken(): Promise<string> {
-  const path = join(backendRunDir(), 'data', 'token');
+  const path = join(resolveDataDir(), 'token');
   const deadline = Date.now() + TOKEN_TIMEOUT_MS;
 
   for (;;) {
@@ -123,11 +142,17 @@ export async function startBackend(): Promise<BackendInfo> {
   }
 
   const { command, args, cwd } = resolveCommand();
+  const dataDir = resolveDataDir();
   console.log(`[backend] 启动：${command} ${args.join(' ')}`);
 
   child = spawn(command, args, {
     cwd,
-    env: { ...process.env, MOGRAB_SERVER__HOST: HOST, MOGRAB_SERVER__PORT: String(PORT) },
+    env: {
+      ...process.env,
+      MOGRAB_HOME: dataDir,
+      MOGRAB_SERVER__HOST: HOST,
+      MOGRAB_SERVER__PORT: String(PORT),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
