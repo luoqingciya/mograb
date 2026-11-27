@@ -441,7 +441,7 @@ pub fn run() {
                 .inner_size(1180.0, 780.0)
                 .min_inner_size(900.0, 600.0)
                 .background_color(Color(0x1b, 0x1d, 0x23, 0xff))
-                .on_navigation(|url| is_allowed_nav(url))
+                .on_navigation(is_allowed_nav)
                 .build()?;
 
             let rt = Arc::clone(&runtime_for_setup);
