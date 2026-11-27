@@ -1658,7 +1658,6 @@ dependencies = [
  "url",
  "utoipa",
  "utoipa-swagger-ui",
- "winres",
 ]
 
 [[package]]

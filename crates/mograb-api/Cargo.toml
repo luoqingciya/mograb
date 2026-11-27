@@ -22,9 +22,6 @@ utoipa-swagger-ui.workspace = true
 subtle.workspace = true
 tracing.workspace = true
 
-[target.'cfg(windows)'.build-dependencies]
-winres.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true
 reqwest.workspace = true
