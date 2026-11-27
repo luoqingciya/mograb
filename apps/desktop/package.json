@@ -1,79 +1,23 @@
 {
   "name": "mograb-desktop",
   "version": "0.0.0",
-  "description": "MoGrab Desktop (Electron) — Windows & Linux",
+  "description": "MoGrab Desktop (Tauri v2) — Windows & Linux",
   "author": "MoGrab Contributors <luoqingciya@users.noreply.github.com>",
   "homepage": "https://github.com/luoqingciya/mograb",
   "private": true,
   "license": "GPL-3.0-only",
-  "main": "dist/main/index.js",
   "scripts": {
     "prebuild": "node scripts/copy-static.mjs",
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
-    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "start": "npm run build && electron .",
-    "pack": "npm run build && electron-builder --win --publish never",
-    "pack:linux": "npm run build && electron-builder --linux deb rpm --publish never",
+    "build": "tsc -p tsconfig.renderer.json",
+    "typecheck": "tsc -p tsconfig.renderer.json --noEmit",
+    "dev": "tauri dev",
+    "tauri": "tauri",
+    "pack": "tauri build --bundles nsis",
+    "pack:linux": "tauri build --bundles deb,rpm",
     "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
+    "@tauri-apps/cli": "^2",
     "typescript": "^5.7.2"
-  },
-  "build": {
-    "appId": "org.mograb.desktop",
-    "productName": "MoGrab",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../../release-artifacts/backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!data/**"
-        ]
-      }
-    ],
-    "win": {
-      "target": [
-        "zip",
-        "nsis"
-      ],
-      "icon": "../../assets/icon.ico",
-      "artifactName": "mograb-desktop-v${version}-windows-x64.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "mograb-desktop-v${version}-windows-x64-setup.${ext}"
-    },
-    "linux": {
-      "target": [
-        "deb",
-        "rpm"
-      ],
-      "icon": "../../assets/icon.png",
-      "category": "Utility",
-      "maintainer": "MoGrab Contributors <luoqingciya@users.noreply.github.com>",
-      "synopsis": "MoGrab — 开源的小说抓取与电子书整理工具",
-      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
-    },
-    "deb": {
-      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}"
-    },
-    "rpm": {
-      "artifactName": "mograb-desktop-v${version}-linux-x64.${ext}",
-      "fpm": [
-        "--verbose"
-      ]
-    }
   }
 }

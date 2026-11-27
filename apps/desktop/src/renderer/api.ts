@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// 本地 API 客户端。
-//
-// 全部走 fetch —— 渲染进程和 API 在同一台机器上，没必要绕 IPC。
-// CSP 里的 connect-src 已经限定只能连 127.0.0.1:48721。
-//
-// 鉴权：每个业务请求都带 Authorization: Bearer <token>，令牌由主进程读好后
-// 经 preload 递过来。SSE 也因此不用 EventSource —— 它设不了请求头，
-// 而把令牌塞进查询串会让它出现在访问日志里。
+// 本地 API + Tauri IPC 客户端。
 
 import type {
   ApiErrorBody,
+  AppInfoOut,
+  AppSettingsOut,
   BookOut,
+  ChapterDetailOut,
+  ChapterSummaryOut,
+  ClearCacheResult,
+  ExportCreate,
+  ExportOut,
+  LocalSearchResponse,
+  RemoveSourceResult,
   SearchResponse,
+  SettingsPatchInput,
+  SourceDetail,
+  SourceInstallRequest,
+  SourceInstallResult,
   SourceOut,
   TaskEvent,
   TaskOut,
   TaskType,
+  UpdateResult,
 } from '../shared/types.js';
 import { subscribe } from './sse.js';
 
@@ -37,20 +44,12 @@ export function isConfigured(): boolean {
   return baseUrl !== '';
 }
 
-/**
- * 断言已经配置过。
- *
- * 没配置就发请求的话，相对路径会被解析成 `file:///D:/...`，
- * 报出来的是 CSP 违规 —— 完全看不出真正的原因。这里拦一道，
- * 错误信息直接说清楚。
- */
 function assertConfigured(): void {
   if (!isConfigured()) {
     throw new ApiError('NOT_CONFIGURED', '还没拿到后端地址就发请求了');
   }
 }
 
-/** 请求头。所有出站请求都从这里取，避免漏掉某个调用点。 */
 function headers(extra?: Record<string, string>): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -59,7 +58,7 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   };
 }
 
-/** 服务端返回的结构化错误（规划书 §37）。 */
+/** 服务端返回的结构化错误。 */
 export class ApiError extends Error {
   constructor(
     readonly code: string,
@@ -98,12 +97,35 @@ async function toApiError(response: Response): Promise<ApiError> {
   try {
     body = (await response.json()) as ApiErrorBody;
   } catch {
-    // 不是 JSON（比如代理返回的 HTML 错误页），下面兜底
+    // 非 JSON 兜底
   }
   if (body !== null && typeof body.code === 'string') {
     return new ApiError(body.code, body.message, body.details ?? {});
   }
   return new ApiError(`HTTP_${response.status}`, `请求失败（HTTP ${response.status}）`);
+}
+
+function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (invoke === undefined) {
+    return Promise.reject(new ApiError('NO_TAURI_RUNTIME', '未检测到 Tauri 运行时'));
+  }
+  return invoke<T>(cmd, args);
+}
+
+// ---------------------------------------------------------------------------
+// Tauri IPC（设置、路径、缓存）
+// ---------------------------------------------------------------------------
+export function getAppInfo(): Promise<AppInfoOut> {
+  return invokeTauri<AppInfoOut>('get_app_info');
+}
+
+export function saveSettings(patch: SettingsPatchInput): Promise<AppSettingsOut> {
+  return invokeTauri<AppSettingsOut>('save_settings', { patch });
+}
+
+export function clearHttpCache(expiredOnly = false): Promise<ClearCacheResult> {
+  return invokeTauri<ClearCacheResult>('clear_http_cache', { expiredOnly });
 }
 
 // ---------------------------------------------------------------------------
@@ -113,8 +135,48 @@ export function listSources(): Promise<SourceOut[]> {
   return request<SourceOut[]>('/sources');
 }
 
+export function getSource(sourceId: string): Promise<SourceDetail> {
+  return request<SourceDetail>(`/sources/${encodeURIComponent(sourceId)}`);
+}
+
+export function installSource(payload: SourceInstallRequest): Promise<SourceInstallResult> {
+  return request<SourceInstallResult>('/sources', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function removeSource(sourceId: string): Promise<RemoveSourceResult> {
+  return request<RemoveSourceResult>(`/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function enableSource(sourceId: string): Promise<SourceOut> {
+  return request<SourceOut>(`/sources/${encodeURIComponent(sourceId)}/enable`, {
+    method: 'POST',
+  });
+}
+
+export function disableSource(sourceId: string): Promise<SourceOut> {
+  return request<SourceOut>(`/sources/${encodeURIComponent(sourceId)}/disable`, {
+    method: 'POST',
+  });
+}
+
+export function rescanSources(): Promise<SourceOut[]> {
+  return request<SourceOut[]>('/sources/rescan', { method: 'POST' });
+}
+
+export function doctorSource(sourceId: string, live = true): Promise<SourceOut> {
+  return request<SourceOut>(
+    `/sources/${encodeURIComponent(sourceId)}/doctor?live=${live ? 'true' : 'false'}`,
+    { method: 'POST' },
+  );
+}
+
 // ---------------------------------------------------------------------------
-// 搜索
+// 搜索（线上 & 本地全文）
 // ---------------------------------------------------------------------------
 export function search(keyword: string, sources: string[] = [], limit = 20): Promise<SearchResponse> {
   const params = new URLSearchParams({ q: keyword, limit: String(limit) });
@@ -124,11 +186,44 @@ export function search(keyword: string, sources: string[] = [], limit = 20): Pro
   return request<SearchResponse>(`/search?${params.toString()}`);
 }
 
+export function searchLocal(
+  keyword: string,
+  bookId?: string,
+  limit = 50,
+): Promise<LocalSearchResponse> {
+  const params = new URLSearchParams({ q: keyword, limit: String(limit) });
+  if (bookId && bookId.trim() !== '') {
+    params.set('book_id', bookId.trim());
+  }
+  return request<LocalSearchResponse>(`/search/local?${params.toString()}`);
+}
+
 // ---------------------------------------------------------------------------
-// 书籍
+// 书籍与章节
 // ---------------------------------------------------------------------------
 export function listBooks(limit = 50): Promise<BookOut[]> {
   return request<BookOut[]>(`/books?limit=${limit}`);
+}
+
+export function getBook(bookId: string): Promise<BookOut> {
+  return request<BookOut>(`/books/${encodeURIComponent(bookId)}`);
+}
+
+export function listChapters(bookId: string): Promise<ChapterSummaryOut[]> {
+  return request<ChapterSummaryOut[]>(`/books/${encodeURIComponent(bookId)}/chapters`);
+}
+
+export function getChapter(bookId: string, chapterId: string): Promise<ChapterDetailOut> {
+  return request<ChapterDetailOut>(
+    `/books/${encodeURIComponent(bookId)}/chapters/${encodeURIComponent(chapterId)}`,
+  );
+}
+
+export function updateBook(bookId: string, dryRun = true): Promise<UpdateResult> {
+  return request<UpdateResult>(
+    `/books/${encodeURIComponent(bookId)}/update?dry_run=${dryRun ? 'true' : 'false'}`,
+    { method: 'POST' },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -160,21 +255,46 @@ export function listTasks(limit = 50): Promise<TaskOut[]> {
 }
 
 export function getTask(taskId: string): Promise<TaskOut> {
-  return request<TaskOut>(`/tasks/${taskId}`);
+  return request<TaskOut>(`/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export function pauseTask(taskId: string): Promise<TaskOut> {
+  return request<TaskOut>(`/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' });
+}
+
+export function resumeTask(taskId: string): Promise<TaskOut> {
+  return request<TaskOut>(`/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+}
+
+export function cancelTask(taskId: string): Promise<TaskOut> {
+  return request<TaskOut>(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+}
+
+export function retryTask(taskId: string): Promise<TaskOut> {
+  return request<TaskOut>(`/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// 导出
+// ---------------------------------------------------------------------------
+export function createExport(payload: ExportCreate): Promise<ExportOut> {
+  return request<ExportOut>('/exports', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listExports(limit = 20): Promise<ExportOut[]> {
+  return request<ExportOut[]>(`/exports?limit=${limit}`);
+}
+
+export function getExport(exportId: string): Promise<ExportOut> {
+  return request<ExportOut>(`/exports/${encodeURIComponent(exportId)}`);
 }
 
 // ---------------------------------------------------------------------------
 // SSE
 // ---------------------------------------------------------------------------
-
-/**
- * 订阅全局任务事件流。
- *
- * 返回一个取消订阅的函数。
- *
- * 传输层在 sse.ts（fetch + 手写解析 + 自动重连），这里只负责挑出 task 事件
- * 并反序列化。不用 EventSource 的原因见 sse.ts 开头。
- */
 export function subscribeTaskEvents(onEvent: (event: TaskEvent) => void): () => void {
   assertConfigured();
 

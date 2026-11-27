@@ -4,13 +4,13 @@
   <head>
     <meta charset="UTF-8" />
     <!--
-      内容安全策略：脚本只允许本地文件，连接只允许本地 API。
+      内容安全策略：脚本只允许本地文件，连接允许 Tauri IPC 与本地 API。
       style 放行 unsafe-inline 是因为进度条宽度要用内联 style 设置 ——
       脚本没有放宽，仍是严格模式。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http://127.0.0.1:48721"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:48721"
     />
     <title>MoGrab</title>
     <link rel="stylesheet" href="./styles.css" />
@@ -23,6 +23,6 @@
         <main id="content" class="content"></main>
       </div>
     </div>
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="./renderer/main.js"></script>
   </body>
 </html>

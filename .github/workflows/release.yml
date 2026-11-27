@@ -134,7 +134,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Windows Desktop（原生后端 mograb-api.exe + Electron → ZIP + NSIS）
+  # Windows Desktop（Tauri v2 进程内嵌入后端 → 便携 ZIP + NSIS 安装包）
   # ---------------------------------------------------------------------------
   build-desktop-windows:
     name: Build Desktop (Windows x64)
@@ -148,6 +148,9 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          prefix-key: "v2-tauri-windows"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -156,34 +159,41 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
-      - name: Build backend sidecar (mograb-api.exe)
-        run: cargo build --release --locked --bin mograb-api
-
-      - name: Stage backend sidecar
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "release-artifacts/backend" | Out-Null
-          Copy-Item "target/release/mograb-api.exe" "release-artifacts/backend/"
-
-      - name: Install Electron dependencies
+      - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
 
-      - name: Build Electron app (ZIP + NSIS)
+      - name: Build Tauri app (NSIS + standalone EXE)
         working-directory: apps/desktop
         shell: bash
         run: |
           version="${{ needs.verify.outputs.version }}"
-          npm run build
-          npx electron-builder --win --publish never --config.extraMetadata.version="$version"
+          npx tauri build --bundles nsis --config "{\"version\":\"$version\"}"
+
+      - name: Stage artifacts (setup EXE + portable ZIP)
+        shell: pwsh
+        run: |
+          $version = "${{ needs.verify.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
+
+          $nsis = Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $nsis) { throw "未找到 NSIS 安装包产物" }
+          Copy-Item $nsis.FullName "release-artifacts/mograb-desktop-v$version-windows-x64-setup.exe"
+
+          $portable = "release-artifacts/mograb-desktop"
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item "apps/desktop/src-tauri/target/release/mograb-desktop.exe" "$portable/"
+          Copy-Item "LICENSE" "$portable/"
+          Copy-Item "THIRD_PARTY_LICENSES.md" "$portable/"
+          Compress-Archive -Path $portable -DestinationPath "release-artifacts/mograb-desktop-v$version-windows-x64.zip"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: desktop-windows
           path: |
-            apps/desktop/release/*.zip
-            apps/desktop/release/*.exe
+            release-artifacts/mograb-desktop-*.zip
+            release-artifacts/mograb-desktop-*-setup.exe
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -227,7 +237,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Linux Desktop（原生后端 mograb-api + Electron → DEB + RPM）
+  # Linux Desktop（Tauri v2 进程内嵌入后端 → DEB + RPM）
   # ---------------------------------------------------------------------------
   build-desktop-linux:
     name: Build Desktop (Linux x64)
@@ -242,7 +252,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v2-ubuntu-22.04"
+          workspaces: apps/desktop/src-tauri
+          prefix-key: "v2-ubuntu-22.04-tauri"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -251,42 +262,40 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
-      - name: Install RPM packaging dependency
+      - name: Install Tauri & RPM packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm binutils xz-utils ruby ruby-dev build-essential
-          sudo gem install --no-document fpm
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils rpm
 
-      - name: Build backend sidecar (mograb-api)
-        run: cargo build --release --locked --bin mograb-api
-
-      - name: Stage backend sidecar
-        run: |
-          mkdir -p release-artifacts/backend
-          cp target/release/mograb-api release-artifacts/backend/
-          chmod +x release-artifacts/backend/mograb-api
-
-      - name: Install Electron dependencies
+      - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
 
-      - name: Build Electron app (DEB + RPM)
+      - name: Build Tauri app (DEB + RPM)
         working-directory: apps/desktop
-        env:
-          USE_SYSTEM_FPM: "true"
         run: |
           version="${{ needs.verify.outputs.version }}"
-          npm run build
-          npx electron-builder --linux deb rpm --publish never --config.extraMetadata.version="$version"
-          ls -lh release/*.deb release/*.rpm
+          npx tauri build --bundles deb,rpm --config "{\"version\":\"$version\"}"
+
+      - name: Stage Linux packages
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          mkdir -p release-artifacts
+          deb_file="$(find apps/desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' | head -n 1)"
+          rpm_file="$(find apps/desktop/src-tauri/target/release/bundle/rpm -maxdepth 1 -name '*.rpm' | head -n 1)"
+          test -n "$deb_file"
+          test -n "$rpm_file"
+          cp "$deb_file" "release-artifacts/mograb-desktop-v${version}-linux-x64.deb"
+          cp "$rpm_file" "release-artifacts/mograb-desktop-v${version}-linux-x64.rpm"
+          ls -lh release-artifacts/*.deb release-artifacts/*.rpm
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: desktop-linux
           path: |
-            apps/desktop/release/*.deb
-            apps/desktop/release/*.rpm
+            release-artifacts/*.deb
+            release-artifacts/*.rpm
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------

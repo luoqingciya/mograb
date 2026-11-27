@@ -1,0 +1,29 @@
+[package]
+name = "mograb-desktop"
+version = "1.0.0-rc.10"
+description = "MoGrab Desktop (Tauri v2)"
+authors = ["MoGrab Contributors"]
+license = "GPL-3.0-only"
+edition = "2024"
+
+[lib]
+name = "mograb_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "mograb-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mograb-core = { path = "../../../crates/mograb-core" }
+mograb-api = { path = "../../../crates/mograb-api" }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+tracing = "0.1"

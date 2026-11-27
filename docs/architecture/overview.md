@@ -6,10 +6,10 @@
 
 ```
                     ┌────────────────────┐
-                    │   Electron Desktop │
-                    │      Windows       │
+                    │   Tauri Desktop    │
+                    │  Windows & Linux   │
                     └─────────┬──────────┘
-                              │ REST + SSE
+                              │ IPC + REST + SSE
 ┌─────────────────────────────┼──────────────────────────┐
 │                             ▼                          │
 │              MoGrab API Server (Axum)                  │
@@ -68,7 +68,7 @@ MoGrab/
 │   └── mograb-cli/             命令行，clap（二进制 mog）
 │
 ├── apps/
-│   └── desktop/                Electron，仅 Windows
+│   └── desktop/                Tauri v2 + TypeScript，Windows & Linux
 │
 ├── sources/                    本地书源工作区，不进仓库（见下）
 │
@@ -277,7 +277,7 @@ RetryPolicy.should_retry(error, attempt)?
 | 存储 | sqlx (SQLite WAL) | 启动自动迁移 |
 | 日志 | tracing + tracing-subscriber | 结构化日志 + 请求头脱敏 |
 | CLI | clap + comfy-table + indicatif | |
-| 桌面端 | Electron + TypeScript（tsc，不引打包器） | 见 apps/desktop/README.md |
+| 桌面端 | Tauri v2 + TypeScript（tsc，不引打包器） | 进程内嵌入 Axum API，见 apps/desktop/README.md |
 | 测试 | `cargo test --workspace` + CLI 集成测试 | |
 | 质量 | rustfmt + clippy (`-D warnings`) + pre-commit | |
 

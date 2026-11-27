@@ -99,7 +99,7 @@ fn is_allowed_origin(origin: &HeaderValue) -> bool {
     let Ok(s) = origin.to_str() else {
         return false;
     };
-    if s == "null" || s.starts_with("file://") {
+    if s == "null" || s.starts_with("file://") || s == "tauri://localhost" {
         return true;
     }
     let rest = s
@@ -109,7 +109,7 @@ fn is_allowed_origin(origin: &HeaderValue) -> bool {
         return false;
     };
     let host = authority.split(':').next().unwrap_or("");
-    matches!(host, "127.0.0.1" | "localhost")
+    matches!(host, "127.0.0.1" | "localhost" | "tauri.localhost")
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -537,5 +537,23 @@ mod tests {
         );
 
         state.app.aclose().await;
+    }
+
+    #[test]
+    fn test_cors_allowed_origins() {
+        for allowed in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://127.0.0.1:48721",
+            "http://localhost:1420",
+            "file://",
+            "null",
+        ] {
+            let hv = HeaderValue::from_str(allowed).unwrap();
+            assert!(is_allowed_origin(&hv), "expected allowed origin: {allowed}");
+        }
+        let blocked = HeaderValue::from_static("https://example.com");
+        assert!(!is_allowed_origin(&blocked));
     }
 }

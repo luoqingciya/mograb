@@ -2,7 +2,7 @@
 
 # MoGrab
 
-开源的小说抓取与电子书整理工具。Rust 写的，核心引擎 + 本地 API + 命令行 + Windows 桌面端（Electron）。
+开源的小说抓取与电子书整理工具。纯 Rust 技术栈，核心引擎 + 本地 API + 命令行 + Tauri 2 跨平台桌面端。
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg)](https://www.rust-lang.org/)
@@ -41,9 +41,9 @@ content:
 
 ## 现在做到哪了
 
-版本 `1.0.0-rc.9`（**预发布**，Rust 迁移完成并新增 Linux 桌面端 `.deb`/`.rpm`）。规范已经定下来，**整条链路都通了** ——
+版本 `1.0.0-rc.10`（**预发布**，桌面端迁至 Tauri v2 并补全全部功能页）。规范已经定下来，**整条链路都通了** ——
 装书源、搜书、下载、增量更新、导出、在已下载的正文里搜关键词（纯本地），
-全部有命令行入口；本地 API 在同一套 Core 上跑起来了；桌面端最小闭环可用。
+命令行、本地 API 与 Tauri 2 跨平台桌面端已全部打通。
 
 **真实站点跑通过一整本**：`bqgnovels.com` 的书源，完整目录 1453 章，
 端到端下载 **2036 章 / 451 万字**，0 失败，TXT / Markdown / EPUB 三种导出都正常。
@@ -51,7 +51,6 @@ content:
 标成 rc 而不是正式版，是因为**真实站点只验证过一个**——那是最简单的一类
 （Nuxt SSR、内容直出 HTML）。还没遇到过需要 JS 渲染的、有真实反爬的、
 用 GBK 编码的、靠页码规律而非「下一页链接」翻页的站点。
-桌面端也还只有最小闭环。
 
 ```
 规范与领域模型    已冻结
@@ -59,7 +58,7 @@ content:
 内容管线 · 导出    已实现
 存储 · 任务引擎    已实现
 CLI · API        已实现（含鉴权）
-桌面端           最小闭环
+桌面端（Tauri v2） 已完成（6 大页面全打通）
 ```
 
 Rust 工作区单元测试、集成测试、API/CLI 端到端测试与示例书源夹具测试全部通过，Clippy 零告警，CI 全绿。
@@ -68,22 +67,20 @@ Rust 工作区单元测试、集成测试、API/CLI 端到端测试与示例书�
 
 ## 怎么用
 
-**推荐命令行。** 三条路用的都是同一套 Core，行为和产物完全一致，但完成度不一样：
+三条路用的都是同一套 `mograb-core`，行为和产物完全一致：
 
-| | 命令行 | 桌面端 | 本地 API |
+| | 命令行 | 桌面端 (Tauri v2) | 本地 API |
 |---|---|---|---|
 | 搜索书源 | ✅ | ✅ | ✅ |
-| 下载 | ✅ | ✅ 只能从搜索结果点 | ✅ |
-| 任务进度 | ✅ | ✅ | ✅ |
-| 增量更新 / 导出 | ✅ | ⬜ 未接 | ✅ |
-| 书架 / 章节浏览 | ✅ | ⬜ 占位页 | ✅ |
-| 书源管理 | ✅ | ⬜ 占位页 | ✅ |
-| 设置 | ✅ | ⬜ 占位页 | ✅ |
-| 本地全文搜索 | ✅ | ⬜ 未接 | ✅ |
+| 下载 / 直链抓取 | ✅ | ✅ | ✅ |
+| 任务控制 & 实时进度 | ✅ | ✅（暂停/恢复/取消/重试 + 导出记录） | ✅ |
+| 增量更新 / 导出 | ✅ | ✅ | ✅ |
+| 书架 / 内置阅读器 | ✅ | ✅ | ✅ |
+| 书源管理 & 体检 | ✅ | ✅ | ✅ |
+| 设置 & 缓存清理 | ✅ | ✅ | ✅ |
+| 本地全文搜索 | ✅ | ✅ | ✅ |
 
-桌面端目前只有**搜索**和**下载**两个页面能用，书架、书源管理、设置都还是占位页。
-**所以推荐命令行** —— 它是功能最全、最稳的入口。桌面端和 API 是给
-「想要界面」和「想自己写客户端」的场景准备的。
+喜欢终端、脚本化或自动化场景用命令行（`mog`），日常交互阅读与下载可以直接用桌面端。
 
 ### 方式一：用发布包（推荐）
 
@@ -124,7 +121,7 @@ cargo test --workspace           # 跑测试
 - **Windows**：`mograb-desktop-v<版本>-windows-x64-setup.exe`（安装包）或 `mograb-desktop-v<版本>-windows-x64.zip`（便携压缩包）
 - **Linux**：`mograb-desktop-v<版本>-linux-x64.deb`（Debian / Ubuntu）或 `mograb-desktop-v<版本>-linux-x64.rpm`（Fedora / RHEL）
 
-桌面端内置原生后端 `mograb-api`，启动后自己拉起来，不用手工开服务（Linux 安装包数据默认落在 `~/.local/share/mograb`，也可通过 `MOGRAB_HOME` 覆盖）。
+桌面端基于 Tauri v2 并在进程内直接嵌入 `mograb-api`，打开即用，无需手工开服务（Linux 安装包数据默认落在 `~/.local/share/mograb`，也可通过 `MOGRAB_HOME` 覆盖）。
 
 ## 命令行教程
 
@@ -387,7 +384,7 @@ MoGrab/
 │   ├── mograb-api/            本地 API，Axum（二进制 mograb-api）
 │   └── mograb-cli/            命令行，clap（二进制 mog）
 ├── apps/
-│   └── desktop/               桌面端，Electron + TypeScript
+│   └── desktop/               桌面端，Tauri v2 + TypeScript
 ├── sources/                   本地书源工作区（不进仓库）
 ├── tests/fixtures/            书源离线夹具
 └── docs/                      文档

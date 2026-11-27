@@ -1,84 +1,81 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// 渲染进程入口。
-//
-// 先等后端就绪，再搭界面。后端起不来的话，界面再漂亮也没用 ——
-// 所以这一步失败就直接显示原因，不装作没事。
+// 渲染进程入口：等 Tauri 后端就绪后加载完整功能页签。
 
 import type { SearchItem } from '../shared/types.js';
 import { ApiError, configure, createTask, listSources } from './api.js';
 import { el, replace, requireElement } from './dom.js';
+import { createFindView } from './views/find.js';
 import { createSearchView } from './views/search.js';
+import { createSettingsView } from './views/settings.js';
+import { type ShelfInitialTarget, createShelfView } from './views/shelf.js';
+import { createSourcesView } from './views/sources.js';
 import { createTasksView } from './views/tasks.js';
 import type { View } from './views/view.js';
 
 interface Page {
   id: string;
   label: string;
-  /** 未实现的页面在侧边栏里灰着。 */
-  ready: boolean;
-  create(): View;
-}
-
-function placeholderView(title: string, note: string): View {
-  return {
-    element: el(
-      'section',
-      { class: 'view' },
-      el('h1', {}, title),
-      el('p', { class: 'hint' }, note),
-    ),
-    dispose: () => {},
-  };
+  create(arg?: unknown): View;
 }
 
 const PAGES: Page[] = [
   {
     id: 'search',
     label: '搜索',
-    ready: true,
-    create: () => createSearchView({ onDownload: (item) => void handleDownload(item) }),
-  },
-  {
-    id: 'tasks',
-    label: '下载',
-    ready: true,
-    create: () => createTasksView(),
+    create: () =>
+      createSearchView({
+        onDownload: (item) => void handleDownload(item),
+        onDirectDownload: (sourceId, url) => void handleDirectDownload(sourceId, url),
+      }),
   },
   {
     id: 'shelf',
     label: '书架',
-    ready: false,
-    create: () => placeholderView('书架', '还没做。先看「下载」页里的任务。'),
+    create: (arg) =>
+      createShelfView({
+        initial: arg as ShelfInitialTarget | undefined,
+        onNotify: notify,
+        onGoToTasks: () => switchTo('tasks'),
+      }),
+  },
+  {
+    id: 'find',
+    label: '全文检索',
+    create: () =>
+      createFindView({
+        onOpenChapter: (bookId, chapterId) =>
+          switchTo('shelf', { bookId, chapterId } satisfies ShelfInitialTarget),
+      }),
+  },
+  {
+    id: 'tasks',
+    label: '任务',
+    create: () => createTasksView({ onNotify: notify }),
   },
   {
     id: 'sources',
     label: '书源',
-    ready: false,
-    create: () =>
-      placeholderView(
-        '书源管理',
-        '还没做。目前用命令行装：mog source install <source.yaml>',
-      ),
+    create: () => createSourcesView({ onNotify: notify }),
   },
   {
     id: 'settings',
     label: '设置',
-    ready: false,
-    create: () => placeholderView('设置', '还没做。配置文件在 data/config.toml。'),
+    create: () => createSettingsView({ onNotify: notify }),
   },
 ];
 
 let current: View | null = null;
+let noticeTimer: number | undefined;
 
-function switchTo(pageId: string): void {
+function switchTo(pageId: string, arg?: unknown): void {
   const page = PAGES.find((candidate) => candidate.id === pageId);
-  if (page === undefined || !page.ready) {
+  if (page === undefined) {
     return;
   }
 
   current?.dispose();
-  current = page.create();
+  current = page.create(arg);
 
   const content = requireElement<HTMLElement>('#content');
   replace(content, current.element);
@@ -88,13 +85,6 @@ function switchTo(pageId: string): void {
   }
 }
 
-/**
- * 启动期间的占位内容。
- *
- * 视图一被创建就会发请求（任务页还会立刻订阅 SSE），而这时候后端地址还没拿到。
- * 所以启动阶段先放这块占位，等配置就位再建真正的视图 —— 顺序错了的话，
- * 相对路径会被解析成 `file:///...` 然后被 CSP 拦掉，报出来的错完全指不到原因。
- */
 function showStartingPlaceholder(): void {
   const content = requireElement<HTMLElement>('#content');
   replace(
@@ -110,12 +100,17 @@ function showStartingPlaceholder(): void {
 
 function notify(message: string, kind: 'info' | 'error' = 'info'): void {
   const bar = requireElement<HTMLElement>('#notice');
+  if (noticeTimer !== undefined) {
+    window.clearTimeout(noticeTimer);
+    noticeTimer = undefined;
+  }
   replace(bar, el('span', { class: kind === 'error' ? 'error' : 'muted' }, message));
   bar.classList.toggle('visible', message !== '');
   if (message !== '') {
-    window.setTimeout(() => {
+    noticeTimer = window.setTimeout(() => {
       replace(bar);
       bar.classList.remove('visible');
+      noticeTimer = undefined;
     }, 6000);
   }
 }
@@ -137,6 +132,23 @@ async function handleDownload(item: SearchItem): Promise<void> {
   }
 }
 
+async function handleDirectDownload(sourceId: string, url: string): Promise<void> {
+  notify(`正在创建直链下载任务：${url}`);
+  try {
+    await createTask({
+      type: 'download_book',
+      sourceId,
+      url,
+    });
+    notify('已加入下载队列');
+    switchTo('tasks');
+  } catch (error) {
+    const message =
+      error instanceof ApiError ? `${error.message}（${error.code}）` : String(error);
+    notify(`创建任务失败：${message}`, 'error');
+  }
+}
+
 function buildSidebar(): void {
   const sidebar = requireElement<HTMLElement>('#sidebar');
   replace(
@@ -146,10 +158,9 @@ function buildSidebar(): void {
       el(
         'button',
         {
-          class: `nav-item${page.ready ? '' : ' disabled'}`,
+          class: 'nav-item',
           type: 'button',
           'data-page': page.id,
-          disabled: !page.ready,
           onclick: () => switchTo(page.id),
         },
         page.label,
@@ -163,21 +174,27 @@ async function checkSources(): Promise<void> {
     const sources = await listSources();
     const usable = sources.filter((source) => source.enabled);
     if (usable.length === 0) {
-      notify('还没有可用的书源。用 mog source install <source.yaml> 装一个。', 'error');
+      notify('还没有可用的书源，请在「书源」页粘贴 YAML 或选择本地文件安装。', 'error');
     }
   } catch (error) {
     console.warn('[main] 读取书源失败', error);
   }
 }
 
+async function waitForBackend(): Promise<BackendInfo> {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (invoke === undefined) {
+    throw new Error('未检测到 Tauri 运行时，请通过桌面客户端启动');
+  }
+  return await invoke<BackendInfo>('backend_wait');
+}
+
 async function bootstrap(): Promise<void> {
   buildSidebar();
   showStartingPlaceholder();
 
-  // 先把后端信息拿到手，再建视图 —— 视图创建时就会发请求，
-  // 没有地址的话请求会打到 file:// 上去。这条顺序是硬约束，别调换。
   try {
-    const { baseUrl, token } = await window.mograb.waitForBackend();
+    const { baseUrl, token } = await waitForBackend();
     configure(baseUrl, token);
     console.info('[main] 后端就绪:', baseUrl);
   } catch (error) {
