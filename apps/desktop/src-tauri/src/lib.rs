@@ -440,7 +440,7 @@ pub fn run() {
                 .title("MoGrab")
                 .inner_size(1180.0, 780.0)
                 .min_inner_size(900.0, 600.0)
-                .background_color(Color(0x1b, 0x1d, 0x23, 0xff))
+                .background_color(Color(0x11, 0x14, 0x1b, 0xff))
                 .on_navigation(is_allowed_nav)
                 .build()?;
 
