@@ -201,6 +201,8 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-ubuntu-22.04"
 
       - name: Build mog
         run: cargo build --release --locked --bin mog
@@ -239,6 +241,8 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-ubuntu-22.04"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
