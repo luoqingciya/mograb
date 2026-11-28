@@ -175,6 +175,8 @@ mog source test my-source          # 用离线快照真跑一遍提取，查结�
 mog source doctor bqgnovels        # 对着真实站点体检
 ```
 
+> 从零开始编写第一个书源，推荐阅读手把手教程 **[写书源从入门到实战](docs/source-spec/writing-a-source.md)**。
+
 ### 2. 搜书
 
 ```bash
@@ -401,6 +403,10 @@ MoGrab/
 
 ## 文档
 
+- [文档中心](docs/README.md) —— 按用户、书源作者与开发者分类的全部文档索引
+- [用户使用指南](docs/guide/user-guide.md) —— 安装、桌面端 6 大页面说明、双主题切换、数据目录与 `config.toml` 全项配置
+- [CLI 命令完全参考](docs/guide/cli-reference.md) —— `mog` 全局选项、退出码与全部 14 组子命令详解
+- [写书源从入门到实战教程](docs/source-spec/writing-a-source.md) —— 从抓包、`mog source init` 脚手架、5 套进阶场景到排错速查
 - [项目进度](docs/progress.md) —— **做到哪了、还差什么**，进度只在这里维护
 - [架构总览](docs/architecture/overview.md) —— 分层、边界、数据流、技术选型
 - [Source Specification v1](docs/source-spec/source-spec-v1.md) —— 书源规范，最重要的一份

@@ -4,7 +4,8 @@
 > 版本：`spec_version: 1`
 > 生效日期：2026-10-04
 > 对应[原始规划书](../planning/项目规划书.md)（历史存档，非规范）：§3.2、§3.3、§7–§13、§41、§53
-> Python 映射：`mograb/domain/source.py`
+> Rust 映射：`crates/mograb-core/src/domain/source.rs`
+> 实战上手教程：[写书源从入门到实战教程](writing-a-source.md)
 
 ---
 
@@ -641,9 +642,9 @@ my-source-1.0.0.mgs   (ZIP)
 ### 12.1 验证
 
 ```bash
-uv run mog source lint tests/fixtures/example-source/source.yaml
-uv run mog source test tests/fixtures/example-source
-uv run pytest tests/source -v
+mog source lint tests/fixtures/example-source/source.yaml
+mog source test tests/fixtures/example-source
+cargo test -p mograb-core
 ```
 
 `mog source test` 比 `lint` 多查一层：**提取结果是否为空**。
