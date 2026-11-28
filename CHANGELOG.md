@@ -5,6 +5,25 @@
 
 版本号以仓库根的 [`VERSION`](VERSION) 与 [`Cargo.toml`](Cargo.toml) 为唯一基准。
 
+## [1.0.0] - 2026-11-28
+
+**MoGrab 1.0.0 正式版发布。** 经过 `1.0.0rc0`–`1.0.0-rc11` 多轮预发布验证，现以纯 Rust Cargo 工作区与 Tauri v2 跨平台桌面端正式定版。
+
+### 里程碑亮点
+
+- **纯 Rust 核心、API 与 CLI（`mograb-core` / `mograb-api` / `mograb-cli`）**：
+  - 声明式书源引擎（CSS / XPath / JSONPath / Regex / Transform）、异步并发下载、HTTP 缓存、SQLite WAL 存储、TXT / Markdown / EPUB3 导出与纯本地正文检索，保持 `source-spec-v1`、`domain-model-v1`、`storage-v1` 与 `api-v1` 契约完整兼容。
+  - `mog` 单二进制命令行覆盖 14 组子命令，零外部运行时依赖。
+- **跨平台 Tauri v2 桌面端（`apps/desktop`）**：
+  - 进程内直接嵌入 `mograb-api`（`127.0.0.1:48721`），补全搜索、书架与内置章节阅读器、全文检索、任务与导出历史、书源管理、设置与缓存运维全部 6 个页面。
+  - 优化深/浅双主题高对比度与可读性（满足 WCAG AA/AAA 指标与原生 WebView 控件适配），支持「深色 / 浅色 / 跟随系统」切换。
+- **全平台标准化分发产物**：
+  - 提供 Windows x64 CLI（`.zip`）、Linux x64 CLI（`.tar.gz`）、Windows x64 Desktop（NSIS 安装包 `-setup.exe` + 便携 `.zip`）、Linux x64 Desktop（`.deb` / `.rpm`）及 `SHA256SUMS.txt`。
+
+### 修复（自 `1.0.0-rc11`）
+
+- **消除任务生命周期并发竞态**（`crates/mograb-core/src/task/`）：引入短临界区 `state_lock` 原子串行化任务状态转移与 `PersistAndBroadcast` 落库，拆分 `paused` / `cancelled` 控制标记并在重入队时清理旧取消标记，杜绝 `TaskRunner` 覆写终态或已暂停状态；补充并发取消与暂停恢复回归单测（`test_cancel_race_never_reverts_to_running`、`test_pause_and_resume_preserves_paused_status`）。
+
 ## [1.0.0-rc11] - 2026-11-27
 
 优化桌面端视觉对比度、文字可见性与主题切换能力，并调整预发布版本命名规范。

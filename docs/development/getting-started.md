@@ -29,7 +29,7 @@ pre-commit install              # 安装 Git 钩子（可选）
 ### 1.3 验证环境
 
 ```bash
-cargo run --bin mog -- --version     # mog (MoGrab) 1.0.0-rc11
+cargo run --bin mog -- --version     # mog (MoGrab) 1.0.0
 cargo run --bin mog -- init          # 建出数据目录，幂等
 cargo test --workspace               # 运行全部单元 / 集成 / CLI 测试
 cargo clippy --workspace --all-targets -- -D warnings
