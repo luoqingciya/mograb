@@ -80,6 +80,14 @@ impl WorkerPool {
         self.runner.cancel(task_id).await;
     }
 
+    pub async fn pause_task(&self, task_id: &str) {
+        self.runner.pause(task_id).await;
+    }
+
+    pub async fn clear_task_control(&self, task_id: &str) {
+        self.runner.clear_control(task_id).await;
+    }
+
     pub async fn is_cancelled(&self, task_id: &str) -> bool {
         self.runner.is_cancelled(task_id).await
     }

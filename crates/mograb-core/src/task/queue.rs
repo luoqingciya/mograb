@@ -61,6 +61,7 @@ impl TaskQueue {
     }
 
     pub async fn put(&self, task: Task) {
+        self.cancelled.lock().await.remove(&task.id);
         let seq = self.seq.fetch_add(1, AtomicOrdering::Relaxed);
         let item = QueueItem {
             priority: task.priority,
