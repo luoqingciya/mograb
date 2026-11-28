@@ -15,17 +15,30 @@ use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 struct PersistAndBroadcast {
     repo: Arc<dyn TaskRepository>,
     downstream: Option<Arc<dyn StatusListener>>,
+    state_lock: Arc<Mutex<()>>,
 }
 
 #[async_trait]
 impl StatusListener for PersistAndBroadcast {
     async fn on_status_change(&self, task: &Task) {
-        let _ = self.repo.save(task).await;
+        {
+            let _guard = self.state_lock.lock().await;
+            if let Ok(Some(existing)) = self.repo.get(&task.id).await {
+                // 不允许异步 runner 用过期状态覆写终态或已暂停状态
+                if (existing.is_terminal() && task.status != existing.status)
+                    || (existing.status == TaskStatus::Paused && task.status == TaskStatus::Running)
+                {
+                    return;
+                }
+            }
+            let _ = self.repo.save(task).await;
+        }
         if let Some(ref listener) = self.downstream {
             listener.on_status_change(task).await;
         }
@@ -36,6 +49,7 @@ pub struct TaskManager {
     repo: Arc<dyn TaskRepository>,
     queue: Arc<TaskQueue>,
     pool: WorkerPool,
+    state_lock: Arc<Mutex<()>>,
     running: AtomicBool,
 }
 
@@ -47,15 +61,18 @@ impl TaskManager {
         on_status_change: Option<Arc<dyn StatusListener>>,
     ) -> Self {
         let queue = Arc::new(TaskQueue::new());
+        let state_lock = Arc::new(Mutex::new(()));
         let listener = Arc::new(PersistAndBroadcast {
             repo: Arc::clone(&repo),
             downstream: on_status_change,
+            state_lock: Arc::clone(&state_lock),
         });
         let pool = WorkerPool::new(Arc::clone(&queue), handlers, worker_count, Some(listener));
         Self {
             repo,
             queue,
             pool,
+            state_lock,
             running: AtomicBool::new(false),
         }
     }
@@ -135,14 +152,17 @@ impl TaskManager {
     }
 
     pub async fn pause(&self, task_id: &str) -> MoGrabResult<Task> {
+        let _guard = self.state_lock.lock().await;
         let mut task = self.get(task_id).await?;
         task.transition_to(TaskStatus::Paused)?;
-        self.pool.cancel_task(task_id).await;
+        self.pool.pause_task(task_id).await;
+        self.queue.cancel(task_id).await;
         self.repo.save(&task).await?;
         Ok(task)
     }
 
     pub async fn resume(&self, task_id: &str) -> MoGrabResult<Task> {
+        let _guard = self.state_lock.lock().await;
         let mut task = self.get(task_id).await?;
         if task.status != TaskStatus::Paused {
             return Err(MoGrabError::invalid_transition(
@@ -151,6 +171,7 @@ impl TaskManager {
             ));
         }
         task.transition_to(TaskStatus::Pending)?;
+        self.pool.clear_task_control(task_id).await;
         self.repo.save(&task).await?;
         self.queue.put(task.clone()).await;
         Ok(task)
@@ -161,14 +182,15 @@ impl TaskManager {
     }
 
     pub async fn cancel(&self, task_id: &str) -> MoGrabResult<Task> {
-        let mut task = self.get(task_id).await?;
+        let _guard = self.state_lock.lock().await;
         self.pool.cancel_task(task_id).await;
         self.queue.cancel(task_id).await;
+        let mut task = self.get(task_id).await?;
         if !task.is_terminal() {
             task.transition_to(TaskStatus::Cancelled)?;
             task.finished_at = Some(Utc::now());
+            self.repo.save(&task).await?;
         }
-        self.repo.save(&task).await?;
         Ok(task)
     }
 
@@ -208,5 +230,149 @@ impl TaskManager {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{Database, SqliteTaskRepository};
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+    use tokio_util::sync::CancellationToken;
+
+    struct YieldOrCancelHandler;
+
+    #[async_trait]
+    impl TaskHandler for YieldOrCancelHandler {
+        async fn handle(&self, _task: &mut Task, cancel: CancellationToken) -> MoGrabResult<()> {
+            tokio::select! {
+                _ = cancel.cancelled() => Err(MoGrabError::task_cancelled("测试取消")),
+                _ = tokio::time::sleep(Duration::from_millis(5)) => Ok(()),
+            }
+        }
+    }
+
+    struct PauseThenCompleteHandler {
+        calls: AtomicUsize,
+        started: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl TaskHandler for PauseThenCompleteHandler {
+        async fn handle(&self, _task: &mut Task, cancel: CancellationToken) -> MoGrabResult<()> {
+            let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                self.started.notify_one();
+                cancel.cancelled().await;
+                return Err(MoGrabError::task_cancelled("暂停退出"));
+            }
+            Ok(())
+        }
+    }
+
+    async fn setup_manager(
+        handler: Arc<dyn TaskHandler>,
+        workers: usize,
+    ) -> (tempfile::TempDir, Database, TaskManager) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("test.db")).await.unwrap();
+        db.init_schema().await.unwrap();
+        let repo: Arc<dyn TaskRepository> = Arc::new(SqliteTaskRepository::new(db.clone()));
+        let mut handlers = HashMap::new();
+        handlers.insert(TaskType::RefreshSource.as_str().to_string(), handler);
+        let mgr = TaskManager::new(repo, handlers, workers, None);
+        mgr.start().await.unwrap();
+        (dir, db, mgr)
+    }
+
+    #[tokio::test]
+    async fn test_cancel_race_never_reverts_to_running() {
+        let (_dir, db, mgr) = setup_manager(Arc::new(YieldOrCancelHandler), 4).await;
+
+        let mut ids = Vec::new();
+        for _ in 0..30 {
+            let task = mgr
+                .create(
+                    TaskType::RefreshSource,
+                    None,
+                    Some("src_1".into()),
+                    0,
+                    0,
+                    0,
+                    Map::new(),
+                    true,
+                )
+                .await
+                .unwrap();
+            let cancelled = mgr.cancel(&task.id).await.unwrap();
+            assert!(cancelled.is_terminal());
+
+            let pause_err = mgr.pause(&task.id).await.unwrap_err();
+            assert_eq!(pause_err.code(), "TASK_INVALID_TRANSITION");
+            ids.push(task.id);
+        }
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        for id in ids {
+            let latest = mgr.get(&id).await.unwrap();
+            assert!(
+                latest.is_terminal(),
+                "任务 {} 不应回到非终态 {:?}",
+                id,
+                latest.status
+            );
+        }
+
+        mgr.stop(true).await;
+        db.dispose().await;
+    }
+
+    #[tokio::test]
+    async fn test_pause_and_resume_preserves_paused_status() {
+        let started = Arc::new(Notify::new());
+        let handler = Arc::new(PauseThenCompleteHandler {
+            calls: AtomicUsize::new(0),
+            started: Arc::clone(&started),
+        });
+        let (_dir, db, mgr) = setup_manager(handler, 2).await;
+
+        let task = mgr
+            .create(
+                TaskType::RefreshSource,
+                None,
+                Some("src_1".into()),
+                0,
+                0,
+                0,
+                Map::new(),
+                true,
+            )
+            .await
+            .unwrap();
+
+        started.notified().await;
+        let paused = mgr.pause(&task.id).await.unwrap();
+        assert_eq!(paused.status, TaskStatus::Paused);
+
+        // 等待首次运行因 CancellationToken 退出并完成状态通知
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let after_abort = mgr.get(&task.id).await.unwrap();
+        assert_eq!(after_abort.status, TaskStatus::Paused);
+
+        let resumed = mgr.resume(&task.id).await.unwrap();
+        assert_eq!(resumed.status, TaskStatus::Pending);
+
+        for _ in 0..40 {
+            let latest = mgr.get(&task.id).await.unwrap();
+            if latest.status == TaskStatus::Success {
+                mgr.stop(true).await;
+                db.dispose().await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("恢复后的任务未能在预期时间内完成");
     }
 }
