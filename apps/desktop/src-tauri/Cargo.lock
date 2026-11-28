@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "mograb-api"
-version = "1.0.0-rc11"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2561,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "mograb-core"
-version = "1.0.0-rc11"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2597,7 +2597,7 @@ dependencies = [
 
 [[package]]
 name = "mograb-desktop"
-version = "1.0.0-rc11"
+version = "1.0.0"
 dependencies = [
  "axum",
  "mograb-api",

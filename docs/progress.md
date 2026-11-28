@@ -1,6 +1,6 @@
 # 项目进度
 
-> 更新于 2026-11-27 · 当前版本 `1.0.0-rc11`（预发布，桌面端迁至 Tauri v2 并优化对比度与主题切换）
+> 更新于 2026-11-28 · 当前版本 `1.0.0`（正式版，纯 Rust 工作区 + Tauri v2 跨平台桌面端）
 >
 > **这份文档是进度的唯一出处。** README、CHANGELOG、架构总览里只放一句话摘要，
 > 细节都看这里 —— 之前进度信息散在四个文件里，改一处忘三处。
@@ -15,11 +15,11 @@
 
 | 指标 | 当前 | 怎么刷新 |
 |------|------|---------|
-| 核心库测试 | `mograb-core` 35 项测试通过（含 `example-source` 4 能力夹具与端到端模拟下载/EPUB 导出） | `cargo test -p mograb-core` |
+| 核心库测试 | `mograb-core` 37 项测试通过（含 `example-source` 4 能力夹具、任务并发竞态与端到端模拟下载/EPUB 导出） | `cargo test -p mograb-core` |
 | API 测试 | `mograb-api` 4 项测试通过（CORS、鉴权、24 路径 OpenAPI、SSE、任务状态机与错误码） | `cargo test -p mograb-api` |
 | CLI 测试 | `mograb-cli` 4 项端到端集成测试通过（直接运行 `mog` 二进制） | `cargo test -p mograb-cli` |
 | 静态检查 | `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` | 本地或 CI `lint` job |
-| 桌面端前端测试 | 18 | `cd apps/desktop && npm test` |
+| 桌面端前端测试 | `22` 项测试通过（含 SSE 解析、类型/格式化工具与 WCAG 2.1 对比度/主题单测） | `cd apps/desktop && npm test` |
 
 ## 里程碑
 
@@ -32,9 +32,9 @@
 | v0.3.0 | Source Ecosystem | **达成（有取舍）** | Registry / 回滚 / 远端更新已明确不做，改用 `repository` 字段 |
 | v0.4.0 | API | **达成** | — |
 | v0.5.0 | CLI | **达成** | 独立可执行包的跨机器验证 |
-| v0.6.0 | Desktop | **进行中** | 书架 / 书源管理 / 设置三个页面 |
+| v0.6.0 | Desktop | **达成** | Tauri v2 + 6 大页面与双主题全部完成 |
 | v0.7.0 | EPUB / Polish | **达成** | — |
-| v1.0.0 | Stable | **rc** | 真实站点验证、桌面端三个页面 |
+| v1.0.0 | Stable | **达成** | — |
 
 ### v0.1.0 逐项
 

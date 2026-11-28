@@ -1,6 +1,6 @@
 [package]
 name = "mograb-desktop"
-version = "1.0.0-rc11"
+version = "1.0.0"
 description = "MoGrab Desktop (Tauri v2)"
 authors = ["MoGrab Contributors"]
 license = "GPL-3.0-only"
